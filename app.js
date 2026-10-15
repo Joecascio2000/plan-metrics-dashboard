@@ -1,0 +1,1803 @@
+/**
+ * ==============================================================================
+ * Chaffey College - Institutional Plan Metrics & Goal-Tracking Dashboard
+ * ==============================================================================
+ *
+ * Core Client-Side Application Architecture:
+ * 1. Data Parsing & Handling (SheetJS - Reads strictly from master sheet)
+ * 2. Data Normalization & Plan Grouping (EMP, Strategic Plan 2026-2030, Report Card)
+ * 3. Dynamic Calculation Engine (Baseline, Latest Actual, Target, Variance/Gap, Trend)
+ * 4. Filtering System (Cascading Category & Goal, Modality, Pillar, Format, Search)
+ * 5. Interactive Visualization (Chart.js responsive trend lines & target horizons)
+ * 6. Alert Detection ("Highlight At-Risk Metrics" toggle & institutional warnings)
+ * 7. Export Engine (html2canvas for PNG and jsPDF for PDF document generation)
+ * 8. Theme Management (Light / Dark mode synchronized with chart palettes)
+ */
+
+(function () {
+  'use strict';
+
+  // ============================================================================
+  // Constant Definitions & Schema Keys
+  // ============================================================================
+
+  const HISTORICAL_YEARS = [
+    '2020-2021',
+    '2021-2022',
+    '2022-2023',
+    '2023-2024',
+    '2024-2025',
+    '2025-2026'
+  ];
+
+  const PLAN_DEFINITIONS = {
+    'Educational Master Plan': {
+      title: 'Educational Master Plan (EMP)',
+      desc: 'Tracking long-range educational capacity, scheduling efficiency, course success, and equitable student access aligned with Chaffey College 2025–2026 baseline horizons.',
+      baselineCol: 'EMP Baseline (2025-2026 Yr 0)',
+      targetCol: 'EMP Target Goal',
+      goalCol: 'EMP Goal',
+      areaCol: 'EMP Plan Area(s) (Values separated with ";")',
+      tags: ['Baseline: 2025-2026 (Yr 0)', 'EMP Target Goals', 'Long-Range Educational Planning']
+    },
+    'Strategic Plan (2026-2030)': {
+      title: 'Strategic Plan (2026–2030)',
+      desc: 'Institutional 5-year strategic goals centered on Student Success, Ensured Learning, Career Pathways, and Inclusive Equity with 2024–2025 Year 0 baselines.',
+      baselineCol: 'Strategic Plan Baseline (2024-2025 Yr 0)',
+      targetCol: 'Strategic Plan Target Goal (2026-2030)',
+      goalCol: 'Strategic Plan Goal',
+      areaCol: 'Strategic Plan Objective',
+      tags: ['Baseline: 2024-2025 (Yr 0)', '2026-2030 Target Horizons', '4 Strategic Goals']
+    },
+    'Ongoing Report Card': {
+      title: 'Ongoing Report Card',
+      desc: 'Annual institutional health metrics monitoring multi-year district performance, enrollment trends, persistence, and degree/certificate completions.',
+      baselineCol: '2020-2021',
+      targetCol: 'EMP Target Goal', // Fallback to available targets
+      goalCol: 'EMP Goal',
+      areaCol: 'EMP Plan Area(s) (Values separated with ";")',
+      tags: ['6-Year Historical Trends', 'Districtwide Performance', 'Annual Report Card Tracking']
+    },
+    'ALL': {
+      title: 'All Institutional Plans (Unified Master View)',
+      desc: 'Cross-functional institutional matrix unifying metrics across the Educational Master Plan, Strategic Plan (2026–2030), and Ongoing Report Card.',
+      baselineCol: 'EMP Baseline (2025-2026 Yr 0)',
+      targetCol: 'EMP Target Goal',
+      goalCol: 'EMP Goal',
+      areaCol: 'EMP Plan Area(s) (Values separated with ";")',
+      tags: ['100 Unified Metrics', 'Full Institutional Taxonomy', 'Master Data Sheet']
+    }
+  };
+
+  // ============================================================================
+  // Global Application State
+  // ============================================================================
+
+  const state = {
+    rawMetrics: [],          // Raw rows parsed strictly from master sheet
+    normalizedMetrics: [],   // Enriched with calculations, trends, and parsed numbers
+    activePlan: 'Educational Master Plan', // Default active plan tab
+    activeFilters: {
+      search: '',
+      category: '',
+      goal: '',
+      modality: '',
+      pillar: '',
+      format: '',
+      status: '',
+      quickChip: 'all'
+    },
+    highlightAtRisk: false,  // "Highlight At-Risk Metrics" toggle state
+    theme: localStorage.getItem('chaffey_theme') || 'light',
+    chartInstances: new Map(), // Canvas ID -> Chart.js instance
+    modalChartInstance: null,
+    viewMode: 'grid'         // 'grid' or 'list'
+  };
+
+  // ============================================================================
+  // DOM Element Selectors
+  // ============================================================================
+
+  const elements = {
+    // Header & Actions
+    atRiskToggle: document.getElementById('atRiskToggle'),
+    exportDropdownBtn: document.getElementById('exportDropdownBtn'),
+    exportMenu: document.getElementById('exportMenu'),
+    exportPngBtn: document.getElementById('exportPngBtn'),
+    exportPdfBtn: document.getElementById('exportPdfBtn'),
+    uploadTriggerBtn: document.getElementById('uploadTriggerBtn'),
+    spreadsheetFileInput: document.getElementById('spreadsheetFileInput'),
+    themeToggleBtn: document.getElementById('themeToggleBtn'),
+
+    // Upload & Drop Zone
+    uploadDropZone: document.getElementById('uploadDropZone'),
+    browseFileBtn: document.getElementById('browseFileBtn'),
+    currentFileBadge: document.getElementById('currentFileBadge'),
+
+    // Plan Navigation & Horizon
+    planTabs: document.querySelectorAll('.plan-tab'),
+    planHorizonBanner: document.getElementById('planHorizonBanner'),
+    planTitleDisplay: document.getElementById('planTitleDisplay'),
+    planDescDisplay: document.getElementById('planDescDisplay'),
+    horizonTags: document.getElementById('horizonTags'),
+
+    // Plan Count Pills
+    empCountPill: document.getElementById('empCountPill'),
+    spCountPill: document.getElementById('spCountPill'),
+    rcCountPill: document.getElementById('rcCountPill'),
+    allCountPill: document.getElementById('allCountPill'),
+
+    // KPI Summary
+    kpiHealthPercent: document.getElementById('kpiHealthPercent'),
+    kpiHealthCircle: document.getElementById('kpiHealthCircle'),
+    kpiHealthHeadline: document.getElementById('kpiHealthHeadline'),
+    kpiHealthDetail: document.getElementById('kpiHealthDetail'),
+    kpiTotalMetrics: document.getElementById('kpiTotalMetrics'),
+    kpiTotalSub: document.getElementById('kpiTotalSub'),
+    kpiOnTrackCount: document.getElementById('kpiOnTrackCount'),
+    kpiOnTrackPct: document.getElementById('kpiOnTrackPct'),
+    kpiAtRiskCount: document.getElementById('kpiAtRiskCount'),
+    kpiAtRiskPct: document.getElementById('kpiAtRiskPct'),
+    kpiGoalsMetCount: document.getElementById('kpiGoalsMetCount'),
+    kpiGoalsMetSub: document.getElementById('kpiGoalsMetSub'),
+    kpiAvgProgress: document.getElementById('kpiAvgProgress'),
+    kpiAvgProgressBar: document.getElementById('kpiAvgProgressBar'),
+
+    // Alert Banner
+    atRiskAlertBanner: document.getElementById('atRiskAlertBanner'),
+    atRiskAlertText: document.getElementById('atRiskAlertText'),
+    filterAtRiskOnlyBtn: document.getElementById('filterAtRiskOnlyBtn'),
+    dismissAlertViewBtn: document.getElementById('dismissAlertViewBtn'),
+
+    // Filter Controls
+    metricSearchInput: document.getElementById('metricSearchInput'),
+    searchClearBtn: document.getElementById('searchClearBtn'),
+    categoryFilter: document.getElementById('categoryFilter'),
+    goalFilter: document.getElementById('goalFilter'),
+    modalityFilter: document.getElementById('modalityFilter'),
+    pillarFilter: document.getElementById('pillarFilter'),
+    formatFilter: document.getElementById('formatFilter'),
+    statusFilter: document.getElementById('statusFilter'),
+    resetFiltersBtn: document.getElementById('resetFiltersBtn'),
+    filterActiveCount: document.getElementById('filterActiveCount'),
+    quickChips: document.querySelectorAll('.chip-btn'),
+
+    // Metrics Display
+    metricsGridContainer: document.getElementById('metricsGridContainer'),
+    displayedMetricsCount: document.getElementById('displayedMetricsCount'),
+    emptyState: document.getElementById('emptyState'),
+    emptyResetBtn: document.getElementById('emptyResetBtn'),
+    viewGridBtn: document.getElementById('viewGridBtn'),
+    viewListBtn: document.getElementById('viewListBtn'),
+    dashboardCaptureTarget: document.getElementById('dashboardCaptureTarget'),
+
+    // Modal Details Inspector
+    metricDetailModal: document.getElementById('metricDetailModal'),
+    modalCloseBtn: document.getElementById('modalCloseBtn'),
+    modalCloseFooterBtn: document.getElementById('modalCloseFooterBtn'),
+    modalMetricId: document.getElementById('modalMetricId'),
+    modalStatusBadge: document.getElementById('modalStatusBadge'),
+    modalUnitBadge: document.getElementById('modalUnitBadge'),
+    modalMetricName: document.getElementById('modalMetricName'),
+    modalLatestActual: document.getElementById('modalLatestActual'),
+    modalLatestYear: document.getElementById('modalLatestYear'),
+    modalTargetGoal: document.getElementById('modalTargetGoal'),
+    modalTargetLabel: document.getElementById('modalTargetLabel'),
+    modalBaselineValue: document.getElementById('modalBaselineValue'),
+    modalBaselineLabel: document.getElementById('modalBaselineLabel'),
+    modalGapValue: document.getElementById('modalGapValue'),
+    modalGapSub: document.getElementById('modalGapSub'),
+    modalTrendCanvas: document.getElementById('modalTrendCanvas'),
+    modalHistoryTable: document.getElementById('modalHistoryTable'),
+    modalDefinition: document.getElementById('modalDefinition'),
+    modalPillar: document.getElementById('modalPillar'),
+    modalPlanAlignment: document.getElementById('modalPlanAlignment'),
+    modalGoalArea: document.getElementById('modalGoalArea'),
+    modalDataSource: document.getElementById('modalDataSource'),
+    modalResponsible: document.getElementById('modalResponsible'),
+    modalDisaggregation: document.getElementById('modalDisaggregation'),
+    modalNotes: document.getElementById('modalNotes'),
+
+    // Toast Container
+    toastContainer: document.getElementById('toastContainer')
+  };
+
+  // ============================================================================
+  // Initialization & Bootstrapping
+  // ============================================================================
+
+  function init() {
+    setupTheme();
+    setupEventListeners();
+
+    // Load initial data: Pre-compiled dataset from master sheet if available
+    if (window.DEFAULT_PLAN_METRICS && Array.isArray(window.DEFAULT_PLAN_METRICS) && window.DEFAULT_PLAN_METRICS.length > 0) {
+      processMasterSheetData(window.DEFAULT_PLAN_METRICS, 'unified_plan_metrics_template.xlsx');
+    } else {
+      showToast('Ready for spreadsheet upload. Drag & drop or browse.', 'info');
+    }
+  }
+
+  // ============================================================================
+  // Theme Management (Synchronized with Chart.js)
+  // ============================================================================
+
+  function setupTheme() {
+    document.documentElement.setAttribute('data-theme', state.theme);
+  }
+
+  function toggleTheme() {
+    state.theme = state.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', state.theme);
+    localStorage.setItem('chaffey_theme', state.theme);
+
+    // Refresh all rendered Chart.js instances to update grid lines & tick colors
+    refreshAllCharts();
+  }
+
+  function getChartThemeColors() {
+    const isDark = state.theme === 'dark';
+    return {
+      gridColor: isDark ? 'rgba(51, 65, 85, 0.45)' : 'rgba(226, 232, 240, 0.8)',
+      textColor: isDark ? '#94a3b8' : '#64748b',
+      tooltipBg: isDark ? '#020617' : '#0f172a',
+      lineColor: '#990000',
+      targetLineColor: isDark ? '#38bdf8' : '#0284c7',
+      baselineLineColor: isDark ? '#94a3b8' : '#64748b'
+    };
+  }
+
+  // ============================================================================
+  // 1. Data Parsing & Handling (SheetJS Integration)
+  // ============================================================================
+
+  /**
+   * Handles user spreadsheet file upload (.xlsx, .xls, .csv).
+   * Reads STRICTLY from the primary 'master' sheet as instructed.
+   */
+  function handleFileUpload(file) {
+    if (!file) return;
+
+    const fileName = file.name;
+    const reader = new FileReader();
+
+    showToast(`Parsing spreadsheet: ${fileName}...`, 'info');
+
+    reader.onload = function (e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        // Locate strictly the 'master' sheet (case-insensitive)
+        let masterSheetName = workbook.SheetNames.find(
+          name => name.trim().toLowerCase() === 'master'
+        );
+
+        if (!masterSheetName) {
+          console.warn("'master' sheet not found by name. Checking first sheet.");
+          masterSheetName = workbook.SheetNames[0];
+          showToast(`Note: 'master' sheet not found; reading primary sheet '${masterSheetName}'.`, 'info');
+        }
+
+        const worksheet = workbook.Sheets[masterSheetName];
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+
+        if (!rawJson || rawJson.length === 0) {
+          showToast(`Error: The '${masterSheetName}' sheet appears to be empty.`, 'error');
+          return;
+        }
+
+        // Filter out empty trailing rows that lack Metric ID
+        const validRows = rawJson.filter(row => {
+          const id = row['Metric ID'];
+          return id && String(id).trim().length > 0;
+        });
+
+        processMasterSheetData(validRows, fileName);
+        showToast(`Successfully loaded ${validRows.length} metrics from '${masterSheetName}' sheet!`, 'success');
+      } catch (err) {
+        console.error('Spreadsheet parsing error:', err);
+        showToast(`Failed to parse spreadsheet: ${err.message}`, 'error');
+      }
+    };
+
+    reader.onerror = function () {
+      showToast('Error reading uploaded file.', 'error');
+    };
+
+    reader.readAsArrayBuffer(file);
+  }
+
+  // ============================================================================
+  // 2. Data Normalization & Calculated Fields Engine
+  // ============================================================================
+
+  /**
+   * Normalizes raw spreadsheet rows and calculates institutional metrics:
+   * - Plan memberships
+   * - Latest actuals, prior actuals, and baseline values
+   * - Target goal parsing (numeric, percentages, or growth rates)
+   * - Numerical Gap / Variance
+   * - Progress toward target %
+   * - Goal Status ("On Track", "Off Track", "Goal Met", "Tracking")
+   */
+  function processMasterSheetData(rows, sourceName) {
+    state.rawMetrics = rows;
+
+    state.normalizedMetrics = rows.map(row => {
+      const id = String(row['Metric ID'] || '').trim();
+      const name = String(row['Unified Metric Name'] || row['Metric Name'] || 'Unnamed Metric').trim();
+      const plansField = String(row['Included in Master Plan(s) (Values separated with ";")'] || '');
+      const plans = plansField.split(';').map(p => p.trim()).filter(Boolean);
+
+      const categoryField = String(row['Metric Category(s) (Values separated with ";")'] || '');
+      const categories = categoryField.split(';').map(c => c.trim()).filter(Boolean);
+
+      const parentGroup = String(row['Parent Metric / Group(s) (Values separated with ";")'] || '');
+      const subgroup = String(row['Disaggregation / Sub-Group'] || '').trim();
+      const unitFormat = String(row['Metric Unit / Format'] || 'Count').trim();
+      const definition = String(row['Metric Definition'] || 'No formal definition provided.').trim();
+      const dataSource = String(row['Data Source(s) (Values separated with ";")'] || 'Institutional Research').trim();
+      const responsible = String(row['Responsible Party(s) (Values separated with ";")'] || 'Institutional Research').trim();
+      const pillar = String(row['Guided Pathways Alignment'] || 'Institutional Support').trim();
+      const notes = String(row['Notes & Methodology Nuances'] || '').trim();
+
+      const empBaselineRaw = row['EMP Baseline (2025-2026 Yr 0)'];
+      const empTargetRaw = row['EMP Target Goal'];
+      const spBaselineRaw = row['Strategic Plan Baseline (2024-2025 Yr 0)'];
+      const spTargetRaw = row['Strategic Plan Target Goal (2026-2030)'];
+
+      const empGoal = String(row['EMP Goal'] || '').trim();
+      const empPlanArea = String(row['EMP Plan Area(s) (Values separated with ";")'] || '').trim();
+      const spGoal = String(row['Strategic Plan Goal'] || '').trim();
+      const spObjective = String(row['Strategic Plan Objective'] || '').trim();
+
+      // Extract chronological actuals
+      const history = [];
+      HISTORICAL_YEARS.forEach(year => {
+        const val = row[year];
+        if (val !== null && val !== undefined && val !== '') {
+          const num = typeof val === 'number' ? val : parseFloat(String(val).replace(/[^0-9.-]/g, ''));
+          if (!isNaN(num)) {
+            history.push({ year, value: num, raw: val });
+          }
+        }
+      });
+
+      // Latest actual & Prior actual
+      const latestPoint = history.length > 0 ? history[history.length - 1] : null;
+      const priorPoint = history.length > 1 ? history[history.length - 2] : null;
+
+      const latestActual = latestPoint ? latestPoint.value : null;
+      const latestYear = latestPoint ? latestPoint.year : 'N/A';
+      const priorActual = priorPoint ? priorPoint.value : null;
+
+      // Year-over-Year Delta
+      let yoyDelta = null;
+      let yoyPct = null;
+      if (latestActual !== null && priorActual !== null) {
+        yoyDelta = latestActual - priorActual;
+        yoyPct = priorActual !== 0 ? (yoyDelta / Math.abs(priorActual)) * 100 : 0;
+      }
+
+      // Detect if lower value is desirable (e.g. Average Units Accumulated M-031, M-032, M-033)
+      const isInverseMetric = name.toLowerCase().includes('units accumulated') ||
+                             name.toLowerCase().includes('excess units') ||
+                             name.toLowerCase().includes('time to degree');
+
+      return {
+        id,
+        name,
+        plans,
+        categories,
+        parentGroup,
+        subgroup,
+        unitFormat,
+        definition,
+        dataSource,
+        responsible,
+        pillar,
+        notes,
+        empGoal,
+        empPlanArea,
+        spGoal,
+        spObjective,
+        empBaselineRaw,
+        empTargetRaw,
+        spBaselineRaw,
+        spTargetRaw,
+        history,
+        latestActual,
+        latestYear,
+        priorActual,
+        yoyDelta,
+        yoyPct,
+        isInverseMetric,
+        raw: row
+      };
+    });
+
+    // Update File Info Badge
+    if (elements.currentFileBadge) {
+      elements.currentFileBadge.innerHTML = `
+        <i class="fa-solid fa-check-circle text-green"></i>
+        <span>Dataset Active: <strong>${escapeHtml(sourceName)}</strong> (Master Sheet &bull; ${state.normalizedMetrics.length} Metrics)</span>
+      `;
+    }
+
+    // Refresh UI Plan Counts
+    updatePlanCounts();
+
+    // Populate Filter Dropdowns dynamically
+    populateFilterDropdowns();
+
+    // Render Dashboard View
+    renderDashboard();
+  }
+
+  /**
+   * Evaluates plan-specific metrics for the active tab (EMP, Strategic Plan, Report Card, or All).
+   * Calculates plan-specific target, baseline, numerical gap, and "On Track" / "Off Track" trend.
+   */
+  function evaluateMetricForActivePlan(metric, planName) {
+    const isEmp = planName === 'Educational Master Plan';
+    const isSp = planName === 'Strategic Plan (2026-2030)';
+
+    let rawTarget = null;
+    let rawBaseline = null;
+    let targetLabel = 'Target Goal';
+    let baselineLabel = 'Baseline';
+
+    if (isEmp) {
+      rawTarget = metric.empTargetRaw;
+      rawBaseline = metric.empBaselineRaw;
+      targetLabel = 'EMP Target';
+      baselineLabel = '2025-2026 (Yr 0)';
+    } else if (isSp) {
+      rawTarget = metric.spTargetRaw;
+      rawBaseline = metric.spBaselineRaw;
+      targetLabel = 'SP 2030 Target';
+      baselineLabel = '2024-2025 (Yr 0)';
+    } else {
+      // Ongoing Report Card or All
+      rawTarget = metric.empTargetRaw || metric.spTargetRaw;
+      rawBaseline = metric.empBaselineRaw || metric.spBaselineRaw || (metric.history.length > 0 ? metric.history[0].value : null);
+      targetLabel = 'Target Horizon';
+      baselineLabel = 'Baseline Year';
+    }
+
+    // Parse numeric baseline
+    let baseline = null;
+    if (rawBaseline !== null && rawBaseline !== undefined && rawBaseline !== '') {
+      baseline = parseNumericValue(rawBaseline);
+    } else if (metric.history.length > 0) {
+      baseline = metric.history[0].value;
+    }
+
+    // Parse numeric target
+    let target = null;
+    let targetDisplay = 'None Set';
+    if (rawTarget !== null && rawTarget !== undefined && rawTarget !== '') {
+      targetDisplay = String(rawTarget).trim();
+      target = parseTargetValue(rawTarget, baseline);
+    }
+
+    const latestActual = metric.latestActual;
+    const isInverse = metric.isInverseMetric;
+
+    // Numerical Gap & Progress Calculations
+    let gap = null;
+    let progressPct = null;
+    let status = 'Tracking'; // 'On Track', 'Off Track', 'Goal Met', 'Tracking'
+    let isAtRisk = false;
+
+    if (target !== null && latestActual !== null) {
+      if (isInverse) {
+        // Lower is better (Units accumulated: target 76, baseline 81)
+        gap = latestActual - target; // positive gap means excess units remain
+        const targetMet = latestActual <= target;
+
+        if (targetMet) {
+          status = 'Goal Met';
+          progressPct = 100;
+        } else if (baseline !== null && baseline !== target) {
+          progressPct = ((baseline - latestActual) / (baseline - target)) * 100;
+          progressPct = Math.max(0, Math.min(progressPct, 150));
+
+          // If current actual is higher than baseline, or moving upwards away from target
+          if (latestActual > baseline || (metric.yoyDelta !== null && metric.yoyDelta > 0.5)) {
+            status = 'Off Track';
+            isAtRisk = true;
+          } else {
+            status = 'On Track';
+          }
+        } else {
+          status = latestActual <= target ? 'Goal Met' : 'On Track';
+          progressPct = Math.max(0, 100 - (gap / target) * 100);
+        }
+      } else {
+        // Standard metric: Higher is better (or improving towards target)
+        gap = target - latestActual; // positive gap means remaining units needed
+        const targetMet = latestActual >= target;
+
+        if (targetMet) {
+          status = 'Goal Met';
+          progressPct = 100;
+        } else if (baseline !== null && target !== baseline) {
+          progressPct = ((latestActual - baseline) / (target - baseline)) * 100;
+          progressPct = Math.max(0, Math.min(progressPct, 150));
+
+          // Off-track alert logic:
+          // If latest actual is lower than baseline, or moved downwards away from target
+          if (latestActual < baseline || (metric.yoyDelta !== null && metric.yoyDelta < -0.01 && progressPct < 60)) {
+            status = 'Off Track';
+            isAtRisk = true;
+          } else {
+            status = 'On Track';
+          }
+        } else {
+          progressPct = target > 0 ? (latestActual / target) * 100 : 0;
+          progressPct = Math.max(0, Math.min(progressPct, 150));
+
+          if (metric.yoyDelta !== null && metric.yoyDelta < 0) {
+            status = 'Off Track';
+            isAtRisk = true;
+          } else {
+            status = 'On Track';
+          }
+        }
+      }
+    } else if (latestActual !== null) {
+      // Baseline tracking without numeric target
+      if (baseline !== null) {
+        if (isInverse) {
+          status = latestActual > baseline ? 'Off Track' : 'On Track';
+          isAtRisk = latestActual > baseline;
+        } else {
+          status = latestActual < baseline ? 'Off Track' : 'On Track';
+          isAtRisk = latestActual < baseline;
+        }
+      } else if (metric.yoyDelta !== null) {
+        status = metric.yoyDelta >= 0 ? 'On Track' : 'Off Track';
+        isAtRisk = metric.yoyDelta < 0;
+      }
+    }
+
+    return {
+      ...metric,
+      baseline,
+      rawBaseline,
+      target,
+      rawTarget,
+      targetDisplay,
+      targetLabel,
+      baselineLabel,
+      gap,
+      progressPct: progressPct !== null ? Math.round(progressPct * 10) / 10 : null,
+      status,
+      isAtRisk
+    };
+  }
+
+  /**
+   * Parses targets that can be decimals, percentages, integers, or growth text (e.g. "1% per year").
+   */
+  function parseTargetValue(rawTarget, baseline) {
+    if (rawTarget === null || rawTarget === undefined) return null;
+
+    if (typeof rawTarget === 'number') return rawTarget;
+
+    const str = String(rawTarget).trim().toLowerCase();
+
+    // Check for "1% per year" or "increase 1% per year"
+    if (str.includes('% per year') || str.includes('per year')) {
+      const match = str.match(/(\d+(\.\d+)?)%/);
+      const rate = match ? parseFloat(match[1]) / 100 : 0.01;
+      if (baseline !== null && baseline > 0) {
+        // 5-year target horizon at compound or simple rate
+        return Math.round(baseline * Math.pow(1 + rate, 5) * 100) / 100;
+      }
+      return null;
+    }
+
+    // Direct percentage string: "75%", "80%"
+    if (str.endsWith('%')) {
+      const num = parseFloat(str.replace('%', ''));
+      return isNaN(num) ? null : num / 100;
+    }
+
+    // Direct numeric string
+    const cleaned = str.replace(/[^0-9.-]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+
+  function parseNumericValue(val) {
+    if (typeof val === 'number') return val;
+    if (!val) return null;
+    const cleaned = String(val).replace(/[^0-9.-]/g, '');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? null : num;
+  }
+
+  // ============================================================================
+  // 3. Filtering System & Cascading Logic
+  // ============================================================================
+
+  function populateFilterDropdowns() {
+    // Determine metrics matching the active Plan
+    const planMetrics = state.normalizedMetrics.filter(m => {
+      if (state.activePlan === 'ALL') return true;
+      return m.plans.some(p => p.toLowerCase().includes(state.activePlan.toLowerCase()) ||
+                              (state.activePlan.includes('EMP') && p.includes('Educational Master Plan')));
+    });
+
+    // Populate Categories (cascades with active plan)
+    const categorySet = new Set();
+    planMetrics.forEach(m => {
+      m.categories.forEach(c => categorySet.add(c));
+    });
+
+    const currentCat = elements.categoryFilter.value;
+    elements.categoryFilter.innerHTML = '<option value="">All Categories</option>';
+    Array.from(categorySet).sort().forEach(cat => {
+      const opt = document.createElement('option');
+      opt.value = cat;
+      opt.textContent = cat;
+      elements.categoryFilter.appendChild(opt);
+    });
+    if (categorySet.has(currentCat)) elements.categoryFilter.value = currentCat;
+
+    // Populate Goals / Areas (cascades with active plan)
+    const goalSet = new Set();
+    planMetrics.forEach(m => {
+      if (state.activePlan === 'Educational Master Plan') {
+        if (m.empGoal) goalSet.add(m.empGoal);
+      } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
+        if (m.spGoal) goalSet.add(m.spGoal);
+      } else {
+        if (m.empGoal) goalSet.add(m.empGoal);
+        if (m.spGoal) goalSet.add(m.spGoal);
+      }
+    });
+
+    const currentGoal = elements.goalFilter.value;
+    elements.goalFilter.innerHTML = '<option value="">All Plan Goals & Areas</option>';
+    Array.from(goalSet).sort().forEach(goal => {
+      const opt = document.createElement('option');
+      opt.value = goal;
+      opt.textContent = goal;
+      elements.goalFilter.appendChild(opt);
+    });
+    if (goalSet.has(currentGoal)) elements.goalFilter.value = currentGoal;
+  }
+
+  /**
+   * Filters the metrics list against all active criteria.
+   * Fulfills Acceptance Criterion: EMP dashboard + Course Success + Online Modality.
+   */
+  function getFilteredMetrics() {
+    const plan = state.activePlan;
+    const f = state.activeFilters;
+
+    // Step 1: Filter by Plan
+    let list = state.normalizedMetrics.filter(m => {
+      if (plan === 'ALL') return true;
+      if (plan === 'Educational Master Plan') {
+        return m.plans.includes('Educational Master Plan');
+      }
+      if (plan === 'Strategic Plan (2026-2030)') {
+        return m.plans.some(p => p.includes('Strategic Plan'));
+      }
+      if (plan === 'Ongoing Report Card') {
+        return m.plans.includes('Ongoing Report Card');
+      }
+      return true;
+    });
+
+    // Step 2: Evaluate plan-specific fields (target, baseline, status, at-risk)
+    let evaluatedList = list.map(m => evaluateMetricForActivePlan(m, plan));
+
+    // Step 3: Apply Filters
+    return evaluatedList.filter(m => {
+      // Search input (ID, name, definition, pillar, category)
+      if (f.search) {
+        const query = f.search.toLowerCase();
+        const match = m.id.toLowerCase().includes(query) ||
+                      m.name.toLowerCase().includes(query) ||
+                      m.definition.toLowerCase().includes(query) ||
+                      m.pillar.toLowerCase().includes(query) ||
+                      m.subgroup.toLowerCase().includes(query);
+        if (!match) return false;
+      }
+
+      // Category Filter
+      if (f.category) {
+        const catMatch = m.categories.some(c => c.toLowerCase().includes(f.category.toLowerCase()));
+        if (!catMatch) return false;
+      }
+
+      // Goal Filter
+      if (f.goal) {
+        const goalMatch = (m.empGoal && m.empGoal === f.goal) ||
+                          (m.spGoal && m.spGoal === f.goal) ||
+                          (m.empPlanArea && m.empPlanArea.includes(f.goal));
+        if (!goalMatch) return false;
+      }
+
+      // Modality / Group Filter (Special attention to Online vs In-Person)
+      if (f.modality) {
+        const sub = m.subgroup.toLowerCase();
+        const cat = m.categories.join(' ').toLowerCase();
+        const area = (m.empPlanArea || '').toLowerCase();
+
+        if (f.modality === 'Online') {
+          if (!sub.includes('online') && !cat.includes('online') && !area.includes('online')) return false;
+        } else if (f.modality === 'In-Person') {
+          if (!sub.includes('in-person')) return false;
+        } else if (f.modality === 'Hybrid') {
+          if (!sub.includes('hybrid')) return false;
+        } else if (f.modality === 'Total Districtwide') {
+          if (!sub.includes('total') && !sub.includes('districtwide')) return false;
+        } else if (f.modality.includes('Location')) {
+          if (!sub.includes('location') && !sub.includes('chino') && !sub.includes('fontana')) return false;
+        } else if (f.modality.includes('SCFF')) {
+          if (!sub.includes('scff') && !(m.raw['Metric Trait(s) / Initiative Alignment (Values separated with ";")'] || '').includes('SCFF')) return false;
+        }
+      }
+
+      // Strategic Pillar Filter
+      if (f.pillar) {
+        if (!m.pillar.toLowerCase().includes(f.pillar.toLowerCase())) return false;
+      }
+
+      // Metric Format / Unit Filter
+      if (f.format) {
+        if (!m.unitFormat.toLowerCase().includes(f.format.toLowerCase())) return false;
+      }
+
+      // Status Filter
+      if (f.status) {
+        if (m.status !== f.status) return false;
+      }
+
+      // Quick Chips Filter
+      if (f.quickChip === 'course-success') {
+        const match = m.categories.some(c => c.toLowerCase().includes('course success'));
+        if (!match) return false;
+      } else if (f.quickChip === 'online-modality') {
+        const match = m.subgroup.toLowerCase().includes('online');
+        if (!match) return false;
+      } else if (f.quickChip === 'at-risk') {
+        if (!m.isAtRisk) return false;
+      } else if (f.quickChip === 'has-target') {
+        if (m.target === null) return false;
+      } else if (f.quickChip === 'enrollment') {
+        const match = m.categories.some(c => c.toLowerCase().includes('enrollment') || c.toLowerCase().includes('scheduling'));
+        if (!match) return false;
+      }
+
+      return true;
+    });
+  }
+
+  // ============================================================================
+  // 4. UI Rendering: KPI Summary & Metric Cards Grid
+  // ============================================================================
+
+  function renderDashboard() {
+    updatePlanHorizonBanner();
+
+    const filteredMetrics = getFilteredMetrics();
+
+    // Recalculate and update top KPI Summary (Plan Health)
+    updateKpiSummary(filteredMetrics);
+
+    // Update results counter
+    if (elements.displayedMetricsCount) {
+      elements.displayedMetricsCount.textContent = filteredMetrics.length;
+    }
+
+    // Render Metric Cards
+    renderMetricCards(filteredMetrics);
+
+    // Update active filter counter
+    updateActiveFilterBadge();
+  }
+
+  function updatePlanHorizonBanner() {
+    const info = PLAN_DEFINITIONS[state.activePlan] || PLAN_DEFINITIONS['ALL'];
+    if (elements.planTitleDisplay) elements.planTitleDisplay.textContent = info.title;
+    if (elements.planDescDisplay) elements.planDescDisplay.textContent = info.desc;
+
+    if (elements.horizonTags) {
+      elements.horizonTags.innerHTML = info.tags.map(tag => `
+        <span class="horizon-tag"><i class="fa-solid fa-tag"></i> ${escapeHtml(tag)}</span>
+      `).join('');
+    }
+  }
+
+  function updatePlanCounts() {
+    let empCount = 0, spCount = 0, rcCount = 0, allCount = state.normalizedMetrics.length;
+
+    state.normalizedMetrics.forEach(m => {
+      if (m.plans.includes('Educational Master Plan')) empCount++;
+      if (m.plans.some(p => p.includes('Strategic Plan'))) spCount++;
+      if (m.plans.includes('Ongoing Report Card')) rcCount++;
+    });
+
+    if (elements.empCountPill) elements.empCountPill.textContent = empCount;
+    if (elements.spCountPill) elements.spCountPill.textContent = spCount;
+    if (elements.rcCountPill) elements.rcCountPill.textContent = rcCount;
+    if (elements.allCountPill) elements.allCountPill.textContent = allCount;
+  }
+
+  /**
+   * Dynamically calculates executive summary KPI metrics:
+   * Plan Health (% On Track), Total, At-Risk, Target Achieved, and Average Goal Progress.
+   */
+  function updateKpiSummary(metrics) {
+    const total = metrics.length;
+    if (total === 0) {
+      if (elements.kpiHealthPercent) elements.kpiHealthPercent.textContent = '0%';
+      if (elements.kpiHealthCircle) elements.kpiHealthCircle.setAttribute('stroke-dasharray', '0, 100');
+      if (elements.kpiTotalMetrics) elements.kpiTotalMetrics.textContent = '0';
+      if (elements.kpiOnTrackCount) elements.kpiOnTrackCount.textContent = '0';
+      if (elements.kpiAtRiskCount) elements.kpiAtRiskCount.textContent = '0';
+      if (elements.kpiGoalsMetCount) elements.kpiGoalsMetCount.textContent = '0';
+      if (elements.kpiAvgProgress) elements.kpiAvgProgress.textContent = '0%';
+      if (elements.kpiAvgProgressBar) elements.kpiAvgProgressBar.style.width = '0%';
+      return;
+    }
+
+    let onTrackCount = 0;
+    let atRiskCount = 0;
+    let goalsMetCount = 0;
+    let progressSum = 0;
+    let progressCount = 0;
+
+    metrics.forEach(m => {
+      if (m.status === 'On Track') onTrackCount++;
+      if (m.status === 'Goal Met') {
+        goalsMetCount++;
+        onTrackCount++; // Met goals are also counted in overall positive health
+      }
+      if (m.isAtRisk || m.status === 'Off Track') atRiskCount++;
+
+      if (m.progressPct !== null) {
+        progressSum += m.progressPct;
+        progressCount++;
+      }
+    });
+
+    const healthPct = Math.round((onTrackCount / total) * 100);
+    const avgProgress = progressCount > 0 ? Math.round((progressSum / progressCount) * 10) / 10 : healthPct;
+
+    // Update Plan Health Circular Gauge
+    if (elements.kpiHealthPercent) elements.kpiHealthPercent.textContent = `${healthPct}%`;
+    if (elements.kpiHealthCircle) {
+      elements.kpiHealthCircle.setAttribute('stroke-dasharray', `${healthPct}, 100`);
+      // Update color based on health
+      if (healthPct >= 75) {
+        elements.kpiHealthCircle.style.stroke = 'var(--status-green)';
+      } else if (healthPct >= 55) {
+        elements.kpiHealthCircle.style.stroke = 'var(--status-amber)';
+      } else {
+        elements.kpiHealthCircle.style.stroke = 'var(--status-red)';
+      }
+    }
+
+    if (elements.kpiHealthHeadline) {
+      elements.kpiHealthHeadline.textContent = healthPct >= 80 ? 'Strong Trajectory' :
+                                               healthPct >= 65 ? 'Satisfactory Progress' : 'Requires Attention';
+    }
+
+    if (elements.kpiTotalMetrics) elements.kpiTotalMetrics.textContent = total;
+    if (elements.kpiOnTrackCount) elements.kpiOnTrackCount.textContent = onTrackCount;
+    if (elements.kpiOnTrackPct) elements.kpiOnTrackPct.textContent = `${Math.round((onTrackCount / total) * 100)}% of filtered`;
+    if (elements.kpiAtRiskCount) elements.kpiAtRiskCount.textContent = atRiskCount;
+    if (elements.kpiAtRiskPct) elements.kpiAtRiskPct.textContent = atRiskCount > 0 ? `${atRiskCount} requiring review` : 'All metrics on target';
+    if (elements.kpiGoalsMetCount) elements.kpiGoalsMetCount.textContent = goalsMetCount;
+    if (elements.kpiAvgProgress) elements.kpiAvgProgress.textContent = `${avgProgress}%`;
+    if (elements.kpiAvgProgressBar) elements.kpiAvgProgressBar.style.width = `${Math.min(avgProgress, 100)}%`;
+
+    // Alert Banner Management
+    if (state.highlightAtRisk && atRiskCount > 0) {
+      elements.atRiskAlertBanner.style.display = 'flex';
+      elements.atRiskAlertText.textContent = `Highlighting ${atRiskCount} off-track metrics whose latest actuals are moving away from target goals or underperforming baseline.`;
+    } else {
+      elements.atRiskAlertBanner.style.display = 'none';
+    }
+  }
+
+  /**
+   * Renders dedicated cards for each metric, complete with Chart.js visualization.
+   */
+  function renderMetricCards(metrics) {
+    // Destroy previous Chart.js instances to avoid memory leaks
+    destroyAllCharts();
+
+    const container = elements.metricsGridContainer;
+    container.innerHTML = '';
+
+    if (metrics.length === 0) {
+      elements.emptyState.style.display = 'block';
+      return;
+    }
+    elements.emptyState.style.display = 'none';
+
+    metrics.forEach(metric => {
+      const card = createMetricCardElement(metric);
+      container.appendChild(card);
+    });
+
+    // Initialize Chart.js for all rendered cards
+    metrics.forEach(metric => {
+      initCardChart(metric);
+    });
+  }
+
+  function createMetricCardElement(metric) {
+    const card = document.createElement('article');
+    card.className = 'metric-card';
+    card.setAttribute('data-id', metric.id);
+
+    // Apply Highlight At-Risk styling if active
+    if (state.highlightAtRisk) {
+      if (metric.isAtRisk) {
+        card.classList.add('at-risk-highlight');
+      } else {
+        card.classList.add('dimmed-non-risk');
+      }
+    }
+
+    const formattedActual = formatMetricValue(metric.latestActual, metric.unitFormat);
+    const formattedTarget = metric.target !== null ? formatMetricValue(metric.target, metric.unitFormat) : metric.targetDisplay;
+    const formattedBaseline = metric.baseline !== null ? formatMetricValue(metric.baseline, metric.unitFormat) : 'N/A';
+
+    // Status Badge Markup
+    let statusClass = 'tracking';
+    let statusLabel = 'Tracking';
+    let statusIcon = 'fa-chart-line';
+
+    if (metric.status === 'Goal Met') {
+      statusClass = 'goal-met';
+      statusLabel = 'Goal Met';
+      statusIcon = 'fa-trophy';
+    } else if (metric.status === 'On Track') {
+      statusClass = 'on-track';
+      statusLabel = 'On Track';
+      statusIcon = 'fa-circle-check';
+    } else if (metric.status === 'Off Track' || metric.isAtRisk) {
+      statusClass = 'off-track';
+      statusLabel = 'Needs Attention';
+      statusIcon = 'fa-triangle-exclamation';
+    }
+
+    // Gap Badge Markup
+    let gapHtml = '';
+    if (metric.gap !== null) {
+      const isMet = metric.status === 'Goal Met';
+      const gapClass = isMet ? 'gap-positive' : (metric.isInverseMetric ? (metric.gap <= 0 ? 'gap-positive' : 'gap-negative') : (metric.gap <= 0 ? 'gap-positive' : 'gap-negative'));
+      const formattedGap = formatMetricValue(Math.abs(metric.gap), metric.unitFormat);
+      const gapPrefix = isMet ? 'Met (+ ' : 'Gap: ';
+      const gapSuffix = isMet ? ')' : '';
+      gapHtml = `<span class="card-gap-badge ${gapClass}"><i class="fa-solid fa-scale-unbalanced"></i> ${gapPrefix}${formattedGap}${gapSuffix}</span>`;
+    }
+
+    // Progress Bar Markup
+    let progressHtml = '';
+    if (metric.progressPct !== null) {
+      let progressColor = 'progress-green';
+      if (metric.status === 'Goal Met') progressColor = 'progress-purple';
+      else if (metric.status === 'Off Track') progressColor = 'progress-red';
+      else if (metric.progressPct < 70) progressColor = 'progress-amber';
+
+      progressHtml = `
+        <div class="goal-progress-wrap">
+          <div class="goal-progress-labels">
+            <span>Target Progress</span>
+            <strong>${metric.progressPct}%</strong>
+          </div>
+          <div class="goal-progress-track">
+            <div class="goal-progress-bar ${progressColor}" style="width: ${Math.min(metric.progressPct, 100)}%;"></div>
+          </div>
+        </div>
+      `;
+    }
+
+    // YoY Trend Markup
+    let yoyHtml = '';
+    if (metric.yoyPct !== null) {
+      const isUp = metric.yoyDelta > 0;
+      const isGood = metric.isInverseMetric ? !isUp : isUp;
+      const arrowIcon = isUp ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down';
+      const colorClass = isGood ? 'text-green' : 'text-red';
+      const formattedPct = `${isUp ? '+' : ''}${Math.round(metric.yoyPct * 10) / 10}%`;
+      yoyHtml = `<span class="actual-year-label ${colorClass}"><i class="fa-solid ${arrowIcon}"></i> ${formattedPct} YoY</span>`;
+    }
+
+    // Plan tags
+    const planTagsHtml = metric.plans.map(p => {
+      const shortName = p.includes('Educational Master') ? 'EMP' :
+                        p.includes('Strategic Plan') ? 'Strategic Plan' : 'Report Card';
+      return `<span class="plan-mini-tag">${escapeHtml(shortName)}</span>`;
+    }).join('');
+
+    card.innerHTML = `
+      <div class="card-top-bar">
+        <div class="d-flex align-center gap-1">
+          <span class="id-pill">${escapeHtml(metric.id)}</span>
+          <div class="plan-tags-cluster">${planTagsHtml}</div>
+        </div>
+        <span class="status-badge ${statusClass}">
+          <i class="fa-solid ${statusIcon}"></i> ${statusLabel}
+        </span>
+      </div>
+
+      <h3 class="card-metric-name" title="${escapeHtml(metric.name)}">${escapeHtml(metric.name)}</h3>
+
+      <div class="card-category-subgroup">
+        <span class="category-pill">${escapeHtml(metric.categories[0] || 'General')}</span>
+        ${metric.subgroup ? `<span>&bull;</span> <span class="subgroup-pill">${escapeHtml(metric.subgroup)}</span>` : ''}
+      </div>
+
+      <div class="card-stats-row">
+        <div class="actual-value-wrap">
+          <span class="big-actual-value">${formattedActual}</span>
+          <span class="actual-year-label">(${escapeHtml(metric.latestYear)})</span>
+        </div>
+        ${gapHtml}
+      </div>
+
+      <div class="card-targets-row">
+        <span class="target-stat">Baseline: <strong>${formattedBaseline}</strong></span>
+        <span class="target-stat">${escapeHtml(metric.targetLabel)}: <strong>${formattedTarget}</strong></span>
+        ${yoyHtml}
+      </div>
+
+      ${progressHtml}
+
+      <div class="card-chart-container">
+        <canvas id="chart-${metric.id}"></canvas>
+      </div>
+
+      <div class="card-footer">
+        <span class="pillar-tag" title="${escapeHtml(metric.pillar)}">
+          <i class="fa-solid fa-signs-post"></i> ${escapeHtml(metric.pillar)}
+        </span>
+        <button class="details-btn" data-action="details" data-id="${metric.id}">
+          <span>Details</span> <i class="fa-solid fa-arrow-right"></i>
+        </button>
+      </div>
+    `;
+
+    // Attach click listener for details
+    const detailsBtn = card.querySelector('[data-action="details"]');
+    if (detailsBtn) {
+      detailsBtn.addEventListener('click', () => openMetricModal(metric));
+    }
+
+    return card;
+  }
+
+  // ============================================================================
+  // 5. Chart.js Data Visualization Engine
+  // ============================================================================
+
+  /**
+   * Initializes a responsive mini Chart.js line or bar chart inside the metric card.
+   * Visualizes historical trend (2020-21 through 2025-26), baseline, and target goal.
+   */
+  function initCardChart(metric) {
+    const canvasId = `chart-${metric.id}`;
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const themeColors = getChartThemeColors();
+
+    const labels = metric.history.map(h => h.year.replace('20', "'"));
+    const dataValues = metric.history.map(h => h.value);
+
+    // If historical data is limited to 1 year, render a bar chart, else a curved line chart
+    const chartType = metric.history.length > 2 ? 'line' : 'bar';
+
+    // Build annotations/target dataset if target is numeric
+    const datasets = [
+      {
+        label: 'Actual Value',
+        data: dataValues,
+        borderColor: themeColors.lineColor,
+        backgroundColor: chartType === 'bar' ? 'rgba(153, 0, 0, 0.75)' : 'rgba(153, 0, 0, 0.08)',
+        fill: chartType === 'line',
+        tension: 0.35,
+        borderWidth: 2.2,
+        pointRadius: 3.5,
+        pointHoverRadius: 5.5,
+        pointBackgroundColor: themeColors.lineColor
+      }
+    ];
+
+    // Reference Target Line (if target exists and has matching scale)
+    if (metric.target !== null && !isNaN(metric.target)) {
+      datasets.push({
+        label: metric.targetLabel,
+        data: Array(labels.length).fill(metric.target),
+        borderColor: themeColors.targetLineColor,
+        borderDash: [4, 4],
+        borderWidth: 1.8,
+        pointRadius: 0,
+        fill: false
+      });
+    }
+
+    const chartInstance = new Chart(ctx, {
+      type: chartType,
+      data: {
+        labels: labels,
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: false
+          },
+          tooltip: {
+            backgroundColor: themeColors.tooltipBg,
+            padding: 8,
+            titleFont: { size: 11, family: 'Inter' },
+            bodyFont: { size: 11, family: 'Inter' },
+            callbacks: {
+              label: function (context) {
+                const val = context.parsed.y;
+                return `${context.dataset.label}: ${formatMetricValue(val, metric.unitFormat)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: {
+              display: false
+            },
+            ticks: {
+              color: themeColors.textColor,
+              font: { size: 9, family: 'Inter' }
+            }
+          },
+          y: {
+            grid: {
+              color: themeColors.gridColor
+            },
+            ticks: {
+              color: themeColors.textColor,
+              font: { size: 9, family: 'Inter' },
+              maxTicksLimit: 4,
+              callback: function (val) {
+                return formatChartTick(val, metric.unitFormat);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    state.chartInstances.set(canvasId, chartInstance);
+  }
+
+  function destroyAllCharts() {
+    state.chartInstances.forEach(chart => {
+      if (chart && typeof chart.destroy === 'function') {
+        chart.destroy();
+      }
+    });
+    state.chartInstances.clear();
+  }
+
+  function refreshAllCharts() {
+    const filteredMetrics = getFilteredMetrics();
+    destroyAllCharts();
+    filteredMetrics.forEach(metric => {
+      initCardChart(metric);
+    });
+  }
+
+  // ============================================================================
+  // 6. Modal / Popover Details Inspector
+  // ============================================================================
+
+  function openMetricModal(metric) {
+    const m = evaluateMetricForActivePlan(metric, state.activePlan);
+
+    elements.modalMetricId.textContent = m.id;
+    elements.modalMetricName.textContent = m.name;
+    elements.modalUnitBadge.textContent = m.unitFormat;
+
+    // Status Badge
+    elements.modalStatusBadge.textContent = m.status === 'Goal Met' ? 'Goal Met' :
+                                            m.status === 'On Track' ? 'On Track' :
+                                            m.status === 'Off Track' ? 'Needs Attention' : 'Tracking';
+    elements.modalStatusBadge.className = `status-badge ${m.status === 'Goal Met' ? 'goal-met' : m.status === 'On Track' ? 'on-track' : m.status === 'Off Track' ? 'off-track' : 'tracking'}`;
+
+    // KPI Banner
+    elements.modalLatestActual.textContent = formatMetricValue(m.latestActual, m.unitFormat);
+    elements.modalLatestYear.textContent = m.latestYear;
+    elements.modalTargetGoal.textContent = m.target !== null ? formatMetricValue(m.target, m.unitFormat) : m.targetDisplay;
+    elements.modalTargetLabel.textContent = m.targetLabel;
+    elements.modalBaselineValue.textContent = m.baseline !== null ? formatMetricValue(m.baseline, m.unitFormat) : 'N/A';
+    elements.modalBaselineLabel.textContent = m.baselineLabel;
+
+    if (m.gap !== null) {
+      const isMet = m.status === 'Goal Met';
+      elements.modalGapValue.textContent = `${isMet ? '+' : ''}${formatMetricValue(m.gap, m.unitFormat)}`;
+      elements.modalGapValue.className = `stat-box-value ${isMet ? 'text-green' : 'text-chaffey'}`;
+      elements.modalGapSub.textContent = isMet ? 'Goal Exceeded' : 'Remaining gap to target';
+    } else {
+      elements.modalGapValue.textContent = 'Tracking';
+      elements.modalGapValue.className = 'stat-box-value text-muted';
+      elements.modalGapSub.textContent = 'Baseline Monitoring';
+    }
+
+    // Context & Governance
+    elements.modalDefinition.textContent = m.definition;
+    elements.modalPillar.textContent = m.pillar;
+    elements.modalPlanAlignment.textContent = m.plans.join(', ') || 'Districtwide Master Plan';
+    elements.modalGoalArea.textContent = m.empGoal || m.spGoal || m.empPlanArea || 'Institutional Performance';
+    elements.modalDataSource.textContent = m.dataSource;
+    elements.modalResponsible.textContent = m.responsible;
+    elements.modalDisaggregation.textContent = m.subgroup || 'Total Districtwide';
+    elements.modalNotes.textContent = m.notes || 'No specific notes recorded in template.';
+
+    // Populate Multi-year Historical Data Table
+    populateModalHistoryTable(m);
+
+    // Render Large Modal Trajectory Chart
+    renderModalTrajectoryChart(m);
+
+    // Show modal with accessibility
+    elements.metricDetailModal.style.display = 'flex';
+    elements.metricDetailModal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeModal() {
+    elements.metricDetailModal.style.display = 'none';
+    elements.metricDetailModal.setAttribute('aria-hidden', 'true');
+    document.body.style.overflow = '';
+
+    if (state.modalChartInstance) {
+      state.modalChartInstance.destroy();
+      state.modalChartInstance = null;
+    }
+  }
+
+  function populateModalHistoryTable(m) {
+    const tbody = elements.modalHistoryTable.querySelector('tbody');
+    tbody.innerHTML = '';
+
+    const tr = document.createElement('tr');
+    HISTORICAL_YEARS.forEach(year => {
+      const td = document.createElement('td');
+      const point = m.history.find(h => h.year === year);
+      td.textContent = point ? formatMetricValue(point.value, m.unitFormat) : '—';
+      tr.appendChild(td);
+    });
+
+    const tdBaseline = document.createElement('td');
+    tdBaseline.textContent = m.baseline !== null ? formatMetricValue(m.baseline, m.unitFormat) : '—';
+    tr.appendChild(tdBaseline);
+
+    const tdTarget = document.createElement('td');
+    tdTarget.textContent = m.target !== null ? formatMetricValue(m.target, m.unitFormat) : m.targetDisplay;
+    tdTarget.className = 'text-chaffey font-bold';
+    tr.appendChild(tdTarget);
+
+    tbody.appendChild(tr);
+  }
+
+  function renderModalTrajectoryChart(m) {
+    if (state.modalChartInstance) {
+      state.modalChartInstance.destroy();
+      state.modalChartInstance = null;
+    }
+
+    const canvas = elements.modalTrendCanvas;
+    const ctx = canvas.getContext('2d');
+    const themeColors = getChartThemeColors();
+
+    const labels = HISTORICAL_YEARS;
+    const dataValues = HISTORICAL_YEARS.map(yr => {
+      const point = m.history.find(h => h.year === yr);
+      return point ? point.value : null;
+    });
+
+    const datasets = [
+      {
+        label: 'Historical Actual',
+        data: dataValues,
+        borderColor: '#990000',
+        backgroundColor: 'rgba(153, 0, 0, 0.1)',
+        fill: true,
+        tension: 0.3,
+        borderWidth: 3,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#990000'
+      }
+    ];
+
+    if (m.target !== null) {
+      datasets.push({
+        label: `${m.targetLabel} (${formatMetricValue(m.target, m.unitFormat)})`,
+        data: Array(labels.length).fill(m.target),
+        borderColor: '#0284c7',
+        borderDash: [6, 6],
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false
+      });
+    }
+
+    if (m.baseline !== null) {
+      datasets.push({
+        label: `Baseline (${formatMetricValue(m.baseline, m.unitFormat)})`,
+        data: Array(labels.length).fill(m.baseline),
+        borderColor: '#64748b',
+        borderDash: [3, 3],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false
+      });
+    }
+
+    state.modalChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            labels: {
+              color: themeColors.textColor,
+              font: { family: 'Inter', size: 12, weight: 600 }
+            }
+          },
+          tooltip: {
+            backgroundColor: themeColors.tooltipBg,
+            padding: 10,
+            callbacks: {
+              label: function (ctx) {
+                return `${ctx.dataset.label}: ${formatMetricValue(ctx.parsed.y, m.unitFormat)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: themeColors.gridColor },
+            ticks: { color: themeColors.textColor, font: { family: 'Inter' } }
+          },
+          y: {
+            grid: { color: themeColors.gridColor },
+            ticks: {
+              color: themeColors.textColor,
+              font: { family: 'Inter' },
+              callback: function (val) {
+                return formatChartTick(val, m.unitFormat);
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // ============================================================================
+  // 7. Export Functionality (html2canvas & jsPDF)
+  // ============================================================================
+
+  /**
+   * Captures the visible dashboard DOM state and downloads as a PNG image.
+   */
+  async function exportDashboardAsPng() {
+    showToast('Generating high-resolution PNG snapshot...', 'info');
+
+    try {
+      const target = elements.dashboardCaptureTarget;
+      const originalScrollTop = window.scrollY;
+
+      // Use html2canvas to rasterize
+      const canvas = await html2canvas(target, {
+        scale: 2, // high DPI
+        useCORS: true,
+        backgroundColor: state.theme === 'dark' ? '#0b1120' : '#f8fafc',
+        logging: false
+      });
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const planSlug = state.activePlan.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `Chaffey_Plan_Metrics_${planSlug}_${dateStr}.png`;
+
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+
+      showToast('PNG dashboard export downloaded successfully!', 'success');
+      window.scrollTo(0, originalScrollTop);
+    } catch (err) {
+      console.error('PNG export error:', err);
+      showToast(`Failed to export PNG: ${err.message}`, 'error');
+    }
+  }
+
+  /**
+   * Captures the visible dashboard DOM state and compiles a multi-page PDF document.
+   */
+  async function exportDashboardAsPdf() {
+    showToast('Compiling executive PDF report...', 'info');
+
+    try {
+      const target = elements.dashboardCaptureTarget;
+      const { jsPDF } = window.jspdf;
+
+      const canvas = await html2canvas(target, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: state.theme === 'dark' ? '#0b1120' : '#f8fafc',
+        logging: false
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const imgWidth = 210; // A4 width in mm
+      const pageHeight = 297; // A4 height in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const planSlug = state.activePlan.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `Chaffey_Plan_Metrics_${planSlug}_${dateStr}.pdf`;
+
+      pdf.save(filename);
+      showToast('PDF report generated and downloaded!', 'success');
+    } catch (err) {
+      console.error('PDF export error:', err);
+      showToast(`Failed to export PDF: ${err.message}`, 'error');
+    }
+  }
+
+  // ============================================================================
+  // Event Listeners & UI Interactions
+  // ============================================================================
+
+  function setupEventListeners() {
+    // Theme Toggle
+    elements.themeToggleBtn.addEventListener('click', toggleTheme);
+
+    // File Upload Trigger Buttons
+    elements.uploadTriggerBtn.addEventListener('click', () => {
+      elements.spreadsheetFileInput.click();
+    });
+    elements.browseFileBtn.addEventListener('click', () => {
+      elements.spreadsheetFileInput.click();
+    });
+    elements.spreadsheetFileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleFileUpload(e.target.files[0]);
+      }
+    });
+
+    // Drag and Drop Handling
+    const dropZone = elements.uploadDropZone;
+    ['dragenter', 'dragover'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.add('drag-over');
+      }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+      dropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropZone.classList.remove('drag-over');
+      }, false);
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (dt.files && dt.files[0]) {
+        handleFileUpload(dt.files[0]);
+      }
+    });
+
+    // Plan Navigation Tabs
+    elements.planTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        elements.planTabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        state.activePlan = tab.getAttribute('data-plan');
+
+        // Reset category and goal filters when switching plans to prevent mismatched cascading
+        elements.categoryFilter.value = '';
+        elements.goalFilter.value = '';
+        state.activeFilters.category = '';
+        state.activeFilters.goal = '';
+
+        populateFilterDropdowns();
+        renderDashboard();
+      });
+    });
+
+    // Highlight At-Risk Toggle
+    elements.atRiskToggle.addEventListener('change', (e) => {
+      state.highlightAtRisk = e.target.checked;
+      renderDashboard();
+    });
+
+    if (elements.filterAtRiskOnlyBtn) {
+      elements.filterAtRiskOnlyBtn.addEventListener('click', () => {
+        state.activeFilters.quickChip = 'at-risk';
+        elements.quickChips.forEach(c => c.classList.remove('active'));
+        const chip = document.querySelector('[data-chip="at-risk"]');
+        if (chip) chip.classList.add('active');
+        renderDashboard();
+      });
+    }
+
+    if (elements.dismissAlertViewBtn) {
+      elements.dismissAlertViewBtn.addEventListener('click', () => {
+        state.highlightAtRisk = false;
+        elements.atRiskToggle.checked = false;
+        renderDashboard();
+      });
+    }
+
+    // Export Dropdown Trigger
+    elements.exportDropdownBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      elements.exportMenu.classList.toggle('show');
+    });
+
+    document.addEventListener('click', () => {
+      elements.exportMenu.classList.remove('show');
+    });
+
+    elements.exportPngBtn.addEventListener('click', () => {
+      elements.exportMenu.classList.remove('show');
+      exportDashboardAsPng();
+    });
+
+    elements.exportPdfBtn.addEventListener('click', () => {
+      elements.exportMenu.classList.remove('show');
+      exportDashboardAsPdf();
+    });
+
+    // Filter Controls
+    elements.metricSearchInput.addEventListener('input', (e) => {
+      state.activeFilters.search = e.target.value.trim();
+      elements.searchClearBtn.style.display = state.activeFilters.search ? 'block' : 'none';
+      renderDashboard();
+    });
+
+    elements.searchClearBtn.addEventListener('click', () => {
+      elements.metricSearchInput.value = '';
+      state.activeFilters.search = '';
+      elements.searchClearBtn.style.display = 'none';
+      renderDashboard();
+    });
+
+    elements.categoryFilter.addEventListener('change', (e) => {
+      state.activeFilters.category = e.target.value;
+      renderDashboard();
+    });
+
+    elements.goalFilter.addEventListener('change', (e) => {
+      state.activeFilters.goal = e.target.value;
+      renderDashboard();
+    });
+
+    elements.modalityFilter.addEventListener('change', (e) => {
+      state.activeFilters.modality = e.target.value;
+      renderDashboard();
+    });
+
+    elements.pillarFilter.addEventListener('change', (e) => {
+      state.activeFilters.pillar = e.target.value;
+      renderDashboard();
+    });
+
+    elements.formatFilter.addEventListener('change', (e) => {
+      state.activeFilters.format = e.target.value;
+      renderDashboard();
+    });
+
+    elements.statusFilter.addEventListener('change', (e) => {
+      state.activeFilters.status = e.target.value;
+      renderDashboard();
+    });
+
+    elements.resetFiltersBtn.addEventListener('click', resetAllFilters);
+    elements.emptyResetBtn.addEventListener('click', resetAllFilters);
+
+    // Quick Filter Chips
+    elements.quickChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        elements.quickChips.forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.activeFilters.quickChip = chip.getAttribute('data-chip');
+        renderDashboard();
+      });
+    });
+
+    // View Density Controls
+    elements.viewGridBtn.addEventListener('click', () => {
+      elements.viewGridBtn.classList.add('active');
+      elements.viewListBtn.classList.remove('active');
+      elements.metricsGridContainer.style.gridTemplateColumns = 'repeat(auto-fill, minmax(360px, 1fr))';
+    });
+
+    elements.viewListBtn.addEventListener('click', () => {
+      elements.viewListBtn.classList.add('active');
+      elements.viewGridBtn.classList.remove('active');
+      elements.metricsGridContainer.style.gridTemplateColumns = '1fr';
+    });
+
+    // Modal Close Triggers
+    elements.modalCloseBtn.addEventListener('click', closeModal);
+    elements.modalCloseFooterBtn.addEventListener('click', closeModal);
+    elements.metricDetailModal.addEventListener('click', (e) => {
+      if (e.target === elements.metricDetailModal) {
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && elements.metricDetailModal.style.display !== 'none') {
+        closeModal();
+      }
+    });
+  }
+
+  function resetAllFilters() {
+    state.activeFilters = {
+      search: '',
+      category: '',
+      goal: '',
+      modality: '',
+      pillar: '',
+      format: '',
+      status: '',
+      quickChip: 'all'
+    };
+
+    elements.metricSearchInput.value = '';
+    elements.searchClearBtn.style.display = 'none';
+    elements.categoryFilter.value = '';
+    elements.goalFilter.value = '';
+    elements.modalityFilter.value = '';
+    elements.pillarFilter.value = '';
+    elements.formatFilter.value = '';
+    elements.statusFilter.value = '';
+
+    elements.quickChips.forEach(c => c.classList.remove('active'));
+    const defaultChip = document.querySelector('[data-chip="all"]');
+    if (defaultChip) defaultChip.classList.add('active');
+
+    renderDashboard();
+  }
+
+  function updateActiveFilterBadge() {
+    let count = 0;
+    const f = state.activeFilters;
+    if (f.search) count++;
+    if (f.category) count++;
+    if (f.goal) count++;
+    if (f.modality) count++;
+    if (f.pillar) count++;
+    if (f.format) count++;
+    if (f.status) count++;
+    if (f.quickChip && f.quickChip !== 'all') count++;
+
+    if (elements.filterActiveCount) {
+      elements.filterActiveCount.textContent = count === 0 ? '0 filters applied' : `${count} filter${count > 1 ? 's' : ''} applied`;
+    }
+  }
+
+  // ============================================================================
+  // Formatting Helpers & Utilities
+  // ============================================================================
+
+  function formatMetricValue(val, unitFormat) {
+    if (val === null || val === undefined || isNaN(val)) return '—';
+
+    const format = (unitFormat || '').toLowerCase();
+
+    if (format.includes('percentage') || format.includes('percent')) {
+      // If stored as decimal like 0.759 -> 75.9%
+      const pct = val <= 1 && val >= -1 ? val * 100 : val;
+      return `${Math.round(pct * 10) / 10}%`;
+    }
+
+    if (format.includes('decimal') || format.includes('ftes') || format.includes('ratio')) {
+      return Number(val).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    }
+
+    // Default integer count
+    return Number(Math.round(val)).toLocaleString();
+  }
+
+  function formatChartTick(val, unitFormat) {
+    const format = (unitFormat || '').toLowerCase();
+    if (format.includes('percentage')) {
+      const pct = val <= 1 && val >= -1 ? val * 100 : val;
+      return `${Math.round(pct)}%`;
+    }
+    if (val >= 1000) {
+      return `${Math.round(val / 100) / 10}k`;
+    }
+    return val;
+  }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function showToast(message, type = 'info') {
+    const container = elements.toastContainer;
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    let icon = 'fa-info-circle';
+    if (type === 'success') icon = 'fa-check-circle';
+    if (type === 'error') icon = 'fa-triangle-exclamation';
+
+    toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${escapeHtml(message)}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(10px)';
+      toast.style.transition = 'all 0.3s ease';
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+
+  // ============================================================================
+  // Initialize App on DOM Ready
+  // ============================================================================
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+})();
