@@ -15,11 +15,11 @@ The dashboard reads strictly from the primary **master** sheet of `unified_plan_
 - **Instant Pre-loaded Dataset:** Includes pre-compiled data from `unified_plan_metrics_template.xlsx` (`defaultData.js`) so the dashboard works instantly out-of-the-box on local files and GitHub Pages.
 
 ### 2. Multi-Plan Grouping & Navigation
-The application groups the 100 institutional metrics into dedicated, navigable plan tabs:
+The application organizes institutional metrics into dedicated, navigable plan tabs:
+- **All Plans (Unified Master View):** Primary first tab and active by default on load, unifying active institutional metrics across the Educational Master Plan and Strategic Plan (2026–2030).
 - **Educational Master Plan (EMP):** 29 metrics focused on scheduling efficiency, location capacity (Chino, Fontana, Rancho), course fill rates, and student access aligned with 2025–2026 Yr 0 baselines.
 - **Strategic Plan (2026–2030):** 16 core metrics centered on the 4 institutional strategic goals: Student Success, Ensured Learning, Career Pathways, and Inclusive Equity with 2024–2025 Yr 0 baselines.
-- **Ongoing Report Card:** 78 multi-year trend metrics tracking districtwide enrollment, persistence, retention, and degree/certificate awards from 2020–2021 through 2025–2026.
-- **All Plans (Unified Master View):** 100 metrics providing cross-functional institutional oversight.
+- **Ongoing Report Card (Configurable):** Preserved in the codebase and configurable via `CONFIG.showOngoingReportCard` in `app.js` (hidden by default, can be toggled on anytime to show multi-year trend metrics from 2020–2021 through 2025–2026).
 
 ### 3. Dynamic Calculation Engine
 - **Latest Actual Value:** Dynamically identifies the most recent non-null year's actual value across historical reporting cycles (`2020-21` through `2025-26`).
