@@ -34,18 +34,20 @@ The application groups the 100 institutional metrics into dedicated, navigable p
   - **Off Track / At-Risk:** Latest actual moving away from target or underperforming baseline.
   - **Tracking:** Baseline metrics undergoing initial monitoring.
 
-### 4. Interactive Filtering System
-- **Primary Cascading Filters:** Category and Plan Goal / Area automatically cascade based on the selected Plan tab.
-- **Secondary Filters:**
-  - **Guided Pathways Alignment:** Pillar I (Clarify the Path), Pillar II (Enter the Path), Pillar III (Stay on the Path), and Pillar IV (Ensure Learning).
-  - **Modality & Subgroups:** Dedicated filtering for **Online Modality**, **In-Person Modality**, **Hybrid Modality**, **Total Districtwide**, Campus Locations (Chino, Fontana), and SCFF Populations.
-  - **Metric Type / Format:** Percentage, Count/Headcount, Ratio, and Decimal FTES.
-- **Acceptance Criterion Verified:** Filtering the "EMP" dashboard to "Course Success" metrics for "Online Modality" instantly filters to `M-018: Overall Online Course Success Rate` ($75.9\%$, Pillar III: Stay on the Path, Session Length & Modality).
+### 4. Collapsible Sidebar & Dynamic Responsive Layout
+- **Collapsible Left Filter Sidebar:** Positioned on the left side of the dashboard, expanded by default and smoothly collapsible via the toggle button (`<i class="fa-solid fa-chevron-left"></i>`).
+- **Dynamic Metric Cards Reflow:** The card container uses CSS Grid (`repeat(auto-fill, minmax(360px, 1fr))`) to adapt dynamically to available width. When the sidebar is expanded, 2 cards fit side-by-side; when collapsed/hidden, 3 to 4 cards reflow to fill the full screen width.
+- **Dedicated, Separated Filters:**
+  - **Plan Goal:** Dedicated dropdown populated with individual goals split by semicolon (e.g. `1: Success`, `2: Learning`, `3: Career`, `4: Equity`, or EMP Goals).
+  - **Plan Area / Objective:** Dedicated dropdown placed right below Plan Goal for specific objectives and focus areas.
+  - **Guided Pathways Alignment:** Strategic Pillars (Pillars I–IV).
+  - **Modality & Subgroups:** Dynamically populated based on the active Plan tab—only options with at least 1 matching metric are displayed (e.g. Online and In-Person on EMP; Math/English, CPL, Skill Tokens, ILOs on Strategic Plan; Demographics and Special Populations on Report Card).
+- **Interactive KPI Card Filters:** Clicking on the high-level KPI cards (Filtered Total, On Track, At-Risk, Targets Achieved) instantly filters the visible cards.
 
 ### 5. Goal Status & Alert Detection ("Highlight At-Risk Metrics")
-- Leadership toggle switch triggers proactive alert evaluation across all active metrics.
+- Leadership toggle switch automatically filters the dashboard to display only metrics requiring attention.
+- Metrics without target horizons are safely categorized as `Tracking` (baseline monitoring) without triggering false at-risk alerts.
 - Off-track metrics receive an alert border, animated warning badges (`⚠️ Needs Attention`), and high-visibility status indicators.
-- Displays an executive alert banner detailing how many metrics require institutional intervention.
 
 ### 6. Export Functionality
 - **Export as PNG:** Uses `html2canvas` to render high-resolution raster snapshots of the active dashboard state.
