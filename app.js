@@ -731,7 +731,11 @@
       case 'Total Districtwide':
         return sub.includes('total') || sub.includes('districtwide');
       case 'Locations':
-        return sub.includes('location') || sub.includes('chino') || sub.includes('fontana') || sub.includes('rancho') || area.includes('location');
+        // Specifically campus locations (Chino, Fontana, Rancho), strictly excluding districtwide totals
+        if (sub.includes('districtwide') || sub.includes('total')) return false;
+        return sub.includes('chino') || sub.includes('fontana') || sub.includes('rancho') ||
+               name.includes('chino') || name.includes('fontana') || name.includes('rancho') ||
+               (sub.includes('location:') && !sub.includes('districtwide'));
       case 'SCFF':
         return traits.includes('scff') || sub.includes('scff');
       case 'Demographics: Ethnicity':
@@ -831,58 +835,98 @@
       state.activeFilters.pillar = '';
     }
 
-    // 3. Plan Goals (only goals present in current plan, split by ';')
-    const goalSet = new Set();
+    // 3. Plan Goals (only goals present in current plan, split by ';', with [EMP] and [SP] indicators)
+    const empGoalSet = new Set();
+    const spGoalSet = new Set();
+
     planMetrics.forEach(m => {
       if (state.activePlan === 'Educational Master Plan') {
-        m.empGoals.forEach(g => goalSet.add(g));
+        m.empGoals.forEach(g => empGoalSet.add(g));
       } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
-        m.spGoals.forEach(g => goalSet.add(g));
+        m.spGoals.forEach(g => spGoalSet.add(g));
       } else if (state.activePlan === 'Ongoing Report Card') {
-        m.empGoals.forEach(g => goalSet.add(g));
+        m.empGoals.forEach(g => empGoalSet.add(g));
       } else {
-        m.empGoals.forEach(g => goalSet.add(g));
-        m.spGoals.forEach(g => goalSet.add(g));
+        m.empGoals.forEach(g => empGoalSet.add(g));
+        m.spGoals.forEach(g => spGoalSet.add(g));
       }
     });
+
     const currentGoal = state.activeFilters.goal;
     elements.goalFilter.innerHTML = '<option value="">All Plan Goals</option>';
-    Array.from(goalSet).sort().forEach(goal => {
+
+    const goalOptions = [];
+    Array.from(empGoalSet).sort().forEach(g => {
+      goalOptions.push({
+        value: g,
+        label: `[EMP] ${g}`
+      });
+    });
+
+    Array.from(spGoalSet).sort().forEach(g => {
+      const displayLabel = g.startsWith('Goal') ? g : `Goal ${g}`;
+      goalOptions.push({
+        value: g,
+        label: `[SP] ${displayLabel}`
+      });
+    });
+
+    goalOptions.sort((a, b) => a.label.localeCompare(b.label)).forEach(optData => {
       const opt = document.createElement('option');
-      opt.value = goal;
-      opt.textContent = goal;
+      opt.value = optData.value;
+      opt.textContent = optData.label;
       elements.goalFilter.appendChild(opt);
     });
-    if (goalSet.has(currentGoal)) {
+
+    if (empGoalSet.has(currentGoal) || spGoalSet.has(currentGoal)) {
       elements.goalFilter.value = currentGoal;
     } else {
       state.activeFilters.goal = '';
     }
 
     // 4. Plan Areas / Objectives (only areas/objectives present in current plan, split by ';')
-    const areaSet = new Set();
+    const empAreaSet = new Set();
+    const spObjectiveSet = new Set();
+
     planMetrics.forEach(m => {
       if (state.activePlan === 'Educational Master Plan') {
-        m.empPlanAreas.forEach(a => areaSet.add(a));
+        m.empPlanAreas.forEach(a => empAreaSet.add(a));
       } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
-        m.spObjectives.forEach(o => areaSet.add(o));
+        m.spObjectives.forEach(o => spObjectiveSet.add(o));
       } else if (state.activePlan === 'Ongoing Report Card') {
-        m.empPlanAreas.forEach(a => areaSet.add(a));
+        m.empPlanAreas.forEach(a => empAreaSet.add(a));
       } else {
-        m.empPlanAreas.forEach(a => areaSet.add(a));
-        m.spObjectives.forEach(o => areaSet.add(o));
+        m.empPlanAreas.forEach(a => empAreaSet.add(a));
+        m.spObjectives.forEach(o => spObjectiveSet.add(o));
       }
     });
+
     if (elements.areaFilter) {
       const currentArea = state.activeFilters.area;
       elements.areaFilter.innerHTML = '<option value="">All Plan Areas & Objectives</option>';
-      Array.from(areaSet).sort().forEach(area => {
+
+      const areaOptions = [];
+      Array.from(empAreaSet).sort().forEach(a => {
+        areaOptions.push({
+          value: a,
+          label: state.activePlan === 'ALL' ? `[EMP] ${a}` : a
+        });
+      });
+      Array.from(spObjectiveSet).sort().forEach(o => {
+        areaOptions.push({
+          value: o,
+          label: state.activePlan === 'ALL' ? `[SP] ${o}` : o
+        });
+      });
+
+      areaOptions.sort((a, b) => a.label.localeCompare(b.label)).forEach(optData => {
         const opt = document.createElement('option');
-        opt.value = area;
-        opt.textContent = area;
+        opt.value = optData.value;
+        opt.textContent = optData.label;
         elements.areaFilter.appendChild(opt);
       });
-      if (areaSet.has(currentArea)) {
+
+      if (empAreaSet.has(currentArea) || spObjectiveSet.has(currentArea)) {
         elements.areaFilter.value = currentArea;
       } else {
         state.activeFilters.area = '';
