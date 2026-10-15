@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chaffey College - Institutional Plan Metrics & Goal-Tracking Dashboard</title>
+  
+  <!-- Google Fonts: Inter & Outfit -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Font Awesome 6 Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  
+  <!-- Core Custom Stylesheet -->
+  <link rel="stylesheet" href="styles.css">
+
+  <!-- External Client-Side Libraries -->
+  <!-- SheetJS (xlsx) for client-side spreadsheet parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- Chart.js for data visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <!-- html2canvas for rasterizing DOM to images -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <!-- jsPDF for client-side PDF document generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- App Header & Navigation Bar -->
+  <header class="chaffey-header">
+    <div class="header-container">
+      <div class="brand-group">
+        <div class="brand-crest">
+          <i class="fa-solid fa-graduation-cap"></i>
+        </div>
+        <div class="brand-text">
+          <div class="brand-eyebrow">Chaffey Community College District</div>
+          <h1 class="brand-title">Institutional Plan Metrics Dashboard</h1>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <!-- Highlight At-Risk Toggle -->
+        <div class="toggle-control alert-toggle" title="Flag metrics whose actuals are trending away from goals or underperforming baseline">
+          <label class="switch-label" for="atRiskToggle">
+            <span class="switch-text">
+              <i class="fa-solid fa-triangle-exclamation text-amber"></i>
+              Highlight At-Risk Metrics
+            </span>
+            <div class="switch">
+              <input type="checkbox" id="atRiskToggle">
+              <span class="slider round"></span>
+            </div>
+          </label>
+        </div>
+
+        <!-- Export Dropdown -->
+        <div class="dropdown export-dropdown">
+          <button class="btn btn-secondary dropdown-trigger" id="exportDropdownBtn" aria-expanded="false">
+            <i class="fa-solid fa-download"></i>
+            <span>Export Dashboard</span>
+            <i class="fa-solid fa-chevron-down arrow-icon"></i>
+          </button>
+          <div class="dropdown-menu" id="exportMenu">
+            <button class="dropdown-item" id="exportPngBtn">
+              <i class="fa-regular fa-image"></i> Export as PNG Image
+            </button>
+            <button class="dropdown-item" id="exportPdfBtn">
+              <i class="fa-regular fa-file-pdf"></i> Export as PDF Report
+            </button>
+          </div>
+        </div>
+
+        <!-- Upload File Button -->
+        <button class="btn btn-primary" id="uploadTriggerBtn" title="Upload new spreadsheet (reads master sheet)">
+          <i class="fa-solid fa-file-excel"></i>
+          <span>Upload Spreadsheet</span>
+        </button>
+        <input type="file" id="spreadsheetFileInput" accept=".xlsx, .xls, .csv" style="display:none;">
+
+        <!-- Theme Toggle -->
+        <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme" aria-label="Toggle Theme">
+          <i class="fa-solid fa-moon theme-moon"></i>
+          <i class="fa-solid fa-sun theme-sun"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Upload Drag-and-Drop Zone (Collapsible / Dynamic) -->
+  <section class="upload-zone-wrapper" id="uploadDropZone">
+    <div class="upload-drop-content">
+      <div class="upload-icon-circle">
+        <i class="fa-solid fa-cloud-arrow-up"></i>
+      </div>
+      <div class="upload-text-wrap">
+        <h3>Drag &amp; Drop <code>unified_plan_metrics_template.xlsx</code></h3>
+        <p>Client-side parsing strictly from the primary <strong>master</strong> sheet &bull; No server upload</p>
+      </div>
+      <button class="btn btn-sm btn-outline" id="browseFileBtn">Browse Files</button>
+      <div class="current-file-badge" id="currentFileBadge">
+        <i class="fa-solid fa-check-circle text-green"></i>
+        <span>Dataset Active: <strong>unified_plan_metrics_template.xlsx</strong> (Master Sheet &bull; 100 Metrics)</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Dashboard Container -->
+  <main class="dashboard-main" id="dashboardCaptureTarget">
+
+    <!-- Plan Navigation Tabs -->
+    <nav class="plan-tabs-bar" aria-label="Institutional Plans">
+      <div class="plan-tabs-scroll">
+        <button class="plan-tab active" data-plan="Educational Master Plan" id="tab-emp">
+          <i class="fa-solid fa-compass"></i>
+          <span>Educational Master Plan (EMP)</span>
+          <span class="plan-count-pill" id="empCountPill">29</span>
+        </button>
+        <button class="plan-tab" data-plan="Strategic Plan (2026-2030)" id="tab-sp">
+          <i class="fa-solid fa-bullseye"></i>
+          <span>Strategic Plan (2026–2030)</span>
+          <span class="plan-count-pill" id="spCountPill">16</span>
+        </button>
+        <button class="plan-tab" data-plan="Ongoing Report Card" id="tab-rc">
+          <i class="fa-solid fa-chart-line"></i>
+          <span>Ongoing Report Card</span>
+          <span class="plan-count-pill" id="rcCountPill">78</span>
+        </button>
+        <button class="plan-tab" data-plan="ALL" id="tab-all">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>All Plans (Master View)</span>
+          <span class="plan-count-pill" id="allCountPill">100</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Plan Overview & Horizon Banner -->
+    <section class="plan-horizon-banner" id="planHorizonBanner">
+      <div class="horizon-text">
+        <h2 id="planTitleDisplay">Educational Master Plan (EMP)</h2>
+        <p id="planDescDisplay">Tracking long-range educational capacity, scheduling efficiency, course success, and equitable student access aligned with Chaffey College 2025–2026 baseline horizons.</p>
+      </div>
+      <div class="horizon-tags" id="horizonTags">
+        <span class="horizon-tag"><i class="fa-solid fa-calendar-check"></i> Baseline: 2025-2026 (Yr 0)</span>
+        <span class="horizon-tag"><i class="fa-solid fa-flag-checkered"></i> EMP Target Goals</span>
+        <span class="horizon-tag"><i class="fa-solid fa-database"></i> Source: Master Sheet</span>
+      </div>
+    </section>
+
+    <!-- High-Level KPI Summary (Plan Health Overview) -->
+    <section class="kpi-summary-grid" id="kpiSummarySection">
+      <!-- Plan Health Card -->
+      <div class="kpi-card kpi-health-card">
+        <div class="kpi-health-wrapper">
+          <div class="kpi-radial-progress" id="kpiHealthRadial">
+            <svg viewBox="0 0 36 36" class="circular-chart">
+              <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path class="circle-progress" id="kpiHealthCircle" stroke-dasharray="82, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <div class="radial-percentage" id="kpiHealthPercent">82%</div>
+          </div>
+          <div class="kpi-health-info">
+            <span class="kpi-label">Plan Health</span>
+            <h3 class="kpi-headline" id="kpiHealthHeadline">Strong Trajectory</h3>
+            <span class="kpi-subtext" id="kpiHealthDetail">Metrics progressing on track toward target</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filtered Metrics Count -->
+      <div class="kpi-card">
+        <div class="kpi-icon-badge bg-blue-subtle text-blue">
+          <i class="fa-solid fa-list-check"></i>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-label">Filtered Metrics</span>
+          <div class="kpi-value" id="kpiTotalMetrics">29</div>
+          <span class="kpi-subtext" id="kpiTotalSub">Total in view</span>
+        </div>
+      </div>
+
+      <!-- On Track Count -->
+      <div class="kpi-card">
+        <div class="kpi-icon-badge bg-green-subtle text-green">
+          <i class="fa-solid fa-circle-check"></i>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-label">On Track</span>
+          <div class="kpi-value text-green" id="kpiOnTrackCount">24</div>
+          <span class="kpi-subtext" id="kpiOnTrackPct">82.8% of plan</span>
+        </div>
+      </div>
+
+      <!-- At Risk / Off Track Count -->
+      <div class="kpi-card" id="kpiAtRiskCard">
+        <div class="kpi-icon-badge bg-red-subtle text-red">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-label">At-Risk / Off Track</span>
+          <div class="kpi-value text-red" id="kpiAtRiskCount">5</div>
+          <span class="kpi-subtext" id="kpiAtRiskPct">Needs Attention</span>
+        </div>
+      </div>
+
+      <!-- Goals Met Count -->
+      <div class="kpi-card">
+        <div class="kpi-icon-badge bg-chaffey-subtle text-chaffey">
+          <i class="fa-solid fa-trophy"></i>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-label">Targets Achieved</span>
+          <div class="kpi-value text-chaffey" id="kpiGoalsMetCount">7</div>
+          <span class="kpi-subtext" id="kpiGoalsMetSub">Target goal exceeded</span>
+        </div>
+      </div>
+
+      <!-- Average Progress Toward Target -->
+      <div class="kpi-card">
+        <div class="kpi-icon-badge bg-purple-subtle text-purple">
+          <i class="fa-solid fa-chart-pie"></i>
+        </div>
+        <div class="kpi-body">
+          <span class="kpi-label">Average Target Progress</span>
+          <div class="kpi-value" id="kpiAvgProgress">87.4%</div>
+          <div class="progress-bar-track mt-1">
+            <div class="progress-bar-fill bg-purple" id="kpiAvgProgressBar" style="width: 87.4%;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- At-Risk Alert Banner (Active when toggle is ON) -->
+    <div class="alert-banner" id="atRiskAlertBanner" style="display: none;">
+      <div class="alert-content">
+        <i class="fa-solid fa-triangle-exclamation alert-banner-icon"></i>
+        <div class="alert-text">
+          <strong>Institutional Alert Mode Active:</strong>
+          <span id="atRiskAlertText">Highlighting 5 off-track metrics whose latest actuals are moving away from target goals or underperforming baseline.</span>
+        </div>
+      </div>
+      <div class="alert-actions">
+        <button class="btn btn-sm btn-outline-white" id="filterAtRiskOnlyBtn">Show Only At-Risk</button>
+        <button class="btn btn-sm btn-ghost-white" id="dismissAlertViewBtn"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+
+    <!-- Interactive Filtering System (Cascading by Plan) -->
+    <section class="filter-panel" id="filterPanel">
+      <div class="filter-panel-header">
+        <div class="filter-header-title">
+          <i class="fa-solid fa-filter text-chaffey"></i>
+          <span>Dashboard Filters</span>
+          <span class="filter-active-count" id="filterActiveCount">0 filters applied</span>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="resetFiltersBtn">
+          <i class="fa-solid fa-rotate-left"></i> Reset Filters
+        </button>
+      </div>
+
+      <div class="filter-grid">
+        <!-- Search Input -->
+        <div class="filter-item filter-search-span">
+          <label for="metricSearchInput" class="filter-label">Search Metrics</label>
+          <div class="search-input-wrap">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="metricSearchInput" placeholder="Search by ID (e.g. M-012), name, definition, or keyword...">
+            <button class="search-clear-btn" id="searchClearBtn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+
+        <!-- Primary Filter: Category (Cascading) -->
+        <div class="filter-item">
+          <label for="categoryFilter" class="filter-label">Metric Category</label>
+          <select id="categoryFilter" class="filter-select">
+            <option value="">All Categories</option>
+          </select>
+        </div>
+
+        <!-- Primary Filter: Goal / Area (Cascading) -->
+        <div class="filter-item">
+          <label for="goalFilter" class="filter-label">Plan Goal / Area</label>
+          <select id="goalFilter" class="filter-select">
+            <option value="">All Plan Goals &amp; Areas</option>
+          </select>
+        </div>
+
+        <!-- Secondary Filter: Modality / Group (Acceptance Criteria Focus) -->
+        <div class="filter-item">
+          <label for="modalityFilter" class="filter-label">Modality / Sub-Group</label>
+          <select id="modalityFilter" class="filter-select">
+            <option value="">All Modalities &amp; Groups</option>
+            <option value="Online">Online Modality</option>
+            <option value="In-Person">In-Person Modality</option>
+            <option value="Hybrid">Hybrid Modality</option>
+            <option value="Total Districtwide">Total Districtwide</option>
+            <option value="Location: Chino Campus">Location: Chino Campus</option>
+            <option value="Location: Fontana Campus">Location: Fontana Campus</option>
+            <option value="SCFF Population">SCFF Populations</option>
+          </select>
+        </div>
+
+        <!-- Secondary Filter: Guided Pathways Pillar -->
+        <div class="filter-item">
+          <label for="pillarFilter" class="filter-label">Strategic Pillar (Guided Pathways)</label>
+          <select id="pillarFilter" class="filter-select">
+            <option value="">All Strategic Pillars</option>
+            <option value="Pillar I">Pillar I. Clarify the Path</option>
+            <option value="Pillar II">Pillar II. Enter the Path</option>
+            <option value="Pillar III">Pillar III. Stay on the Path</option>
+            <option value="Pillar IV">Pillar IV. Ensure Learning</option>
+          </select>
+        </div>
+
+        <!-- Secondary Filter: Metric Unit / Format -->
+        <div class="filter-item">
+          <label for="formatFilter" class="filter-label">Metric Type / Format</label>
+          <select id="formatFilter" class="filter-select">
+            <option value="">All Metric Formats</option>
+            <option value="Percentage">Percentage (%)</option>
+            <option value="Count">Count / Headcount</option>
+            <option value="Ratio">Ratio / Number</option>
+            <option value="Decimal (FTES)">Decimal (FTES)</option>
+          </select>
+        </div>
+
+        <!-- Secondary Filter: Goal Status -->
+        <div class="filter-item">
+          <label for="statusFilter" class="filter-label">Goal Status</label>
+          <select id="statusFilter" class="filter-select">
+            <option value="">All Statuses</option>
+            <option value="On Track">On Track</option>
+            <option value="Off Track">Off Track / At Risk</option>
+            <option value="Goal Met">Goal Achieved</option>
+            <option value="Tracking">Baseline Tracking</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Quick Filter Chips -->
+      <div class="quick-chips-bar">
+        <span class="chips-label">Quick Filters:</span>
+        <button class="chip-btn active" data-chip="all">All</button>
+        <button class="chip-btn" data-chip="course-success"><i class="fa-solid fa-graduation-cap"></i> Course Success</button>
+        <button class="chip-btn" data-chip="online-modality"><i class="fa-solid fa-laptop"></i> Online Modality</button>
+        <button class="chip-btn" data-chip="at-risk"><i class="fa-solid fa-triangle-exclamation text-amber"></i> Needs Attention</button>
+        <button class="chip-btn" data-chip="has-target"><i class="fa-solid fa-bullseye"></i> With Defined Targets</button>
+        <button class="chip-btn" data-chip="enrollment"><i class="fa-solid fa-users"></i> Enrollment &amp; FTES</button>
+      </div>
+    </section>
+
+    <!-- Metrics Cards Grid -->
+    <section class="metrics-section">
+      <div class="metrics-grid-header">
+        <div class="metrics-results-info">
+          Showing <strong id="displayedMetricsCount">29</strong> institutional metrics
+        </div>
+        <div class="view-density-controls">
+          <button class="density-btn active" id="viewGridBtn" title="Grid View"><i class="fa-solid fa-grip"></i></button>
+          <button class="density-btn" id="viewListBtn" title="Compact Table / List View"><i class="fa-solid fa-list"></i></button>
+        </div>
+      </div>
+
+      <!-- Grid of Metric Cards -->
+      <div class="metrics-grid" id="metricsGridContainer">
+        <!-- Dynamically populated by app.js -->
+      </div>
+
+      <!-- Empty / Zero Results State -->
+      <div class="empty-state" id="emptyState" style="display:none;">
+        <div class="empty-icon"><i class="fa-solid fa-filter-circle-xmark"></i></div>
+        <h3>No matching metrics found</h3>
+        <p>No metrics match the selected plan and filter criteria. Try adjusting or clearing your filters.</p>
+        <button class="btn btn-primary btn-sm" id="emptyResetBtn">Reset All Filters</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Metric Detail Modal / Popover Inspector -->
+  <div class="modal-backdrop" id="metricDetailModal" style="display: none;" aria-hidden="true" role="dialog">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-badge-row">
+            <span class="modal-id-badge" id="modalMetricId">M-012</span>
+            <span class="status-badge" id="modalStatusBadge">On Track</span>
+            <span class="unit-badge" id="modalUnitBadge">Percentage</span>
+          </div>
+          <h2 class="modal-metric-title" id="modalMetricName">Districtwide Course Fill Rate</h2>
+        </div>
+        <button class="modal-close-btn" id="modalCloseBtn" aria-label="Close modal">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Target & Gap Calculation Breakdown Banner -->
+        <div class="modal-kpi-banner" id="modalKpiBanner">
+          <div class="modal-stat-box">
+            <span class="stat-box-label">Latest Actual</span>
+            <span class="stat-box-value" id="modalLatestActual">88.2%</span>
+            <span class="stat-box-sub" id="modalLatestYear">2024-2025</span>
+          </div>
+          <div class="modal-stat-box">
+            <span class="stat-box-label">Target Goal</span>
+            <span class="stat-box-value text-blue" id="modalTargetGoal">90.0%</span>
+            <span class="stat-box-sub" id="modalTargetLabel">EMP Target</span>
+          </div>
+          <div class="modal-stat-box">
+            <span class="stat-box-label">Baseline Year</span>
+            <span class="stat-box-value text-muted" id="modalBaselineValue">88.2%</span>
+            <span class="stat-box-sub" id="modalBaselineLabel">2025-2026 Yr 0</span>
+          </div>
+          <div class="modal-stat-box">
+            <span class="stat-box-label">Variance to Target</span>
+            <span class="stat-box-value" id="modalGapValue">-1.8%</span>
+            <span class="stat-box-sub" id="modalGapSub">Remaining gap</span>
+          </div>
+        </div>
+
+        <!-- Large Trend Visualizer Chart -->
+        <div class="modal-chart-section">
+          <div class="modal-section-title">
+            <i class="fa-solid fa-chart-line text-chaffey"></i> Historical Trajectory &amp; Target Horizon
+          </div>
+          <div class="modal-chart-canvas-wrap">
+            <canvas id="modalTrendCanvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Multi-year Historical Data Table -->
+        <div class="modal-table-section">
+          <div class="modal-section-title">
+            <i class="fa-solid fa-table text-chaffey"></i> Historical Actuals Matrix
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="modalHistoryTable">
+              <thead>
+                <tr>
+                  <th>2020-21</th>
+                  <th>2021-22</th>
+                  <th>2022-23</th>
+                  <th>2023-24</th>
+                  <th>2024-25</th>
+                  <th>2025-26</th>
+                  <th>Baseline</th>
+                  <th>Target Goal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Institutional Context & Metadata -->
+        <div class="modal-details-grid">
+          <div class="detail-block">
+            <h4><i class="fa-solid fa-book-open"></i> Metric Definition</h4>
+            <p id="modalDefinition">Detailed definition of metric calculation and parameters.</p>
+          </div>
+
+          <div class="detail-block">
+            <h4><i class="fa-solid fa-signs-post"></i> Strategic Alignment</h4>
+            <p><strong>Guided Pathways:</strong> <span id="modalPillar">Pillar I. Clarify the Path</span></p>
+            <p><strong>Plan Alignment:</strong> <span id="modalPlanAlignment">Educational Master Plan</span></p>
+            <p><strong>Goal / Area:</strong> <span id="modalGoalArea">Goal 2: Increase Scheduling Efficiency</span></p>
+          </div>
+
+          <div class="detail-block">
+            <h4><i class="fa-solid fa-id-card-clip"></i> Data Governance &amp; Ownership</h4>
+            <p><strong>Data Source:</strong> <span id="modalDataSource">Argos / Informer</span></p>
+            <p><strong>Responsible Party:</strong> <span id="modalResponsible">Executive Director, Institutional Research</span></p>
+            <p><strong>Disaggregation / Sub-Group:</strong> <span id="modalDisaggregation">Total Districtwide</span></p>
+          </div>
+
+          <div class="detail-block">
+            <h4><i class="fa-solid fa-circle-info"></i> Notes &amp; Methodology Nuances</h4>
+            <p id="modalNotes">Detailed notes on methodology, reporting nuances, and cross-dashboard alignments.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="modalCloseFooterBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Preloaded Data from Master Sheet (Works 100% locally and on GitHub Pages) -->
+  <script src="defaultData.js"></script>
+  <!-- Core Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>
