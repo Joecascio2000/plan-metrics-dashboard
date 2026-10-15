@@ -170,7 +170,7 @@
       </div>
 
       <!-- Filtered Metrics Count -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-clickable" id="kpiTotalCard" title="Click to view all metrics in current plan">
         <div class="kpi-icon-badge bg-blue-subtle text-blue">
           <i class="fa-solid fa-list-check"></i>
         </div>
@@ -178,11 +178,12 @@
           <span class="kpi-label">Filtered Metrics</span>
           <div class="kpi-value" id="kpiTotalMetrics">29</div>
           <span class="kpi-subtext" id="kpiTotalSub">Total in view</span>
+          <span class="kpi-filter-hint"><i class="fa-solid fa-rotate-left"></i> Reset filter</span>
         </div>
       </div>
 
       <!-- On Track Count -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-clickable" id="kpiOnTrackCard" title="Click to filter to On Track metrics">
         <div class="kpi-icon-badge bg-green-subtle text-green">
           <i class="fa-solid fa-circle-check"></i>
         </div>
@@ -190,23 +191,25 @@
           <span class="kpi-label">On Track</span>
           <div class="kpi-value text-green" id="kpiOnTrackCount">24</div>
           <span class="kpi-subtext" id="kpiOnTrackPct">82.8% of plan</span>
+          <span class="kpi-filter-hint"><i class="fa-solid fa-filter"></i> Click to filter</span>
         </div>
       </div>
 
       <!-- At Risk / Off Track Count -->
-      <div class="kpi-card" id="kpiAtRiskCard">
+      <div class="kpi-card kpi-clickable" id="kpiAtRiskCard" title="Click to filter to At-Risk / Needs Attention metrics">
         <div class="kpi-icon-badge bg-red-subtle text-red">
           <i class="fa-solid fa-triangle-exclamation"></i>
         </div>
         <div class="kpi-body">
-          <span class="kpi-label">At-Risk / Off Track</span>
+          <span class="kpi-label">At-Risk / Needs Attention</span>
           <div class="kpi-value text-red" id="kpiAtRiskCount">5</div>
           <span class="kpi-subtext" id="kpiAtRiskPct">Needs Attention</span>
+          <span class="kpi-filter-hint"><i class="fa-solid fa-filter"></i> Click to filter</span>
         </div>
       </div>
 
       <!-- Goals Met Count -->
-      <div class="kpi-card">
+      <div class="kpi-card kpi-clickable" id="kpiGoalsMetCard" title="Click to filter to Targets Achieved metrics">
         <div class="kpi-icon-badge bg-chaffey-subtle text-chaffey">
           <i class="fa-solid fa-trophy"></i>
         </div>
@@ -214,7 +217,7 @@
           <span class="kpi-label">Targets Achieved</span>
           <div class="kpi-value text-chaffey" id="kpiGoalsMetCount">7</div>
           <span class="kpi-subtext" id="kpiGoalsMetSub">Target goal exceeded</span>
-        </div>
+          <span class="kpi-filter-hint"><i class="fa-solid fa-filter"></i> Click to filter</span>
       </div>
 
       <!-- Average Progress Toward Target -->
