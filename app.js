@@ -30,6 +30,9 @@
     '2025-2026'
   ];
 
+  // Dual-unit metrics where Report Card tracks headcount and Strategic Plan tracks proportions
+  const DUAL_UNIT_METRIC_IDS = ['M-024', 'M-025', 'M-035', 'M-036'];
+
   const PLAN_DEFINITIONS = {
     'Educational Master Plan': {
       title: 'Educational Master Plan (EMP)',
@@ -53,7 +56,7 @@
       title: 'Ongoing Report Card',
       desc: 'Annual institutional health metrics monitoring multi-year district performance, enrollment trends, persistence, and degree/certificate completions.',
       baselineCol: '2020-2021',
-      targetCol: 'EMP Target Goal', // Fallback to available targets
+      targetCol: null, // Report Card tracks baseline trends; no artificial target imposed
       goalCol: 'EMP Goal',
       areaCol: 'EMP Plan Area(s) (Values separated with ";")',
       tags: ['6-Year Historical Trends', 'Districtwide Performance', 'Annual Report Card Tracking']
@@ -87,7 +90,7 @@
       status: '',
       quickChip: 'all'
     },
-    highlightAtRisk: false,  // "Highlight At-Risk Metrics" toggle state
+    highlightAtRisk: false,  // "Highlight At-Risk Metrics" toggle state (shows only at-risk metrics when true)
     theme: localStorage.getItem('chaffey_theme') || 'light',
     chartInstances: new Map(), // Canvas ID -> Chart.js instance
     modalChartInstance: null,
@@ -134,12 +137,16 @@
     kpiHealthDetail: document.getElementById('kpiHealthDetail'),
     kpiTotalMetrics: document.getElementById('kpiTotalMetrics'),
     kpiTotalSub: document.getElementById('kpiTotalSub'),
+    kpiTotalCard: document.getElementById('kpiTotalCard'),
     kpiOnTrackCount: document.getElementById('kpiOnTrackCount'),
     kpiOnTrackPct: document.getElementById('kpiOnTrackPct'),
+    kpiOnTrackCard: document.getElementById('kpiOnTrackCard'),
     kpiAtRiskCount: document.getElementById('kpiAtRiskCount'),
     kpiAtRiskPct: document.getElementById('kpiAtRiskPct'),
+    kpiAtRiskCard: document.getElementById('kpiAtRiskCard'),
     kpiGoalsMetCount: document.getElementById('kpiGoalsMetCount'),
     kpiGoalsMetSub: document.getElementById('kpiGoalsMetSub'),
+    kpiGoalsMetCard: document.getElementById('kpiGoalsMetCard'),
     kpiAvgProgress: document.getElementById('kpiAvgProgress'),
     kpiAvgProgressBar: document.getElementById('kpiAvgProgressBar'),
 
@@ -315,6 +322,7 @@
   /**
    * Normalizes raw spreadsheet rows and calculates institutional metrics:
    * - Plan memberships
+   * - Semicolon-split Goals and Plan Areas (Requirement 5)
    * - Latest actuals, prior actuals, and baseline values
    * - Target goal parsing (numeric, percentages, or growth rates)
    * - Numerical Gap / Variance
@@ -347,10 +355,11 @@
       const spBaselineRaw = row['Strategic Plan Baseline (2024-2025 Yr 0)'];
       const spTargetRaw = row['Strategic Plan Target Goal (2026-2030)'];
 
-      const empGoal = String(row['EMP Goal'] || '').trim();
-      const empPlanArea = String(row['EMP Plan Area(s) (Values separated with ";")'] || '').trim();
-      const spGoal = String(row['Strategic Plan Goal'] || '').trim();
-      const spObjective = String(row['Strategic Plan Objective'] || '').trim();
+      // Semicolon-split Goals & Areas (Requirement 5)
+      const empGoals = String(row['EMP Goal'] || '').split(';').map(g => g.trim()).filter(Boolean);
+      const spGoals = String(row['Strategic Plan Goal'] || '').split(';').map(g => g.trim()).filter(Boolean);
+      const empPlanAreas = String(row['EMP Plan Area(s) (Values separated with ";")'] || '').split(';').map(a => a.trim()).filter(Boolean);
+      const spObjectives = String(row['Strategic Plan Objective'] || '').split(';').map(o => o.trim()).filter(Boolean);
 
       // Extract chronological actuals
       const history = [];
@@ -398,10 +407,10 @@
         responsible,
         pillar,
         notes,
-        empGoal,
-        empPlanArea,
-        spGoal,
-        spObjective,
+        empGoals,
+        spGoals,
+        empPlanAreas,
+        spObjectives,
         empBaselineRaw,
         empTargetRaw,
         spBaselineRaw,
@@ -438,30 +447,68 @@
   /**
    * Evaluates plan-specific metrics for the active tab (EMP, Strategic Plan, Report Card, or All).
    * Calculates plan-specific target, baseline, numerical gap, and "On Track" / "Off Track" trend.
+   *
+   * Addresses:
+   * - Requirement 1: Dual-unit handling (M-024, M-025, M-035, M-036) where counts vs percentages are on different scales.
+   * - Requirement 2: Metrics without targets are strictly marked as 'Tracking' (NEVER 'On Track' or 'Needs Attention').
    */
   function evaluateMetricForActivePlan(metric, planName) {
     const isEmp = planName === 'Educational Master Plan';
     const isSp = planName === 'Strategic Plan (2026-2030)';
+    const isDualUnit = DUAL_UNIT_METRIC_IDS.includes(metric.id);
 
     let rawTarget = null;
     let rawBaseline = null;
     let targetLabel = 'Target Goal';
     let baselineLabel = 'Baseline';
+    let activeUnitFormat = metric.unitFormat;
+    let effectiveLatestActual = metric.latestActual;
+    let companionHeadcount = null;
 
     if (isEmp) {
       rawTarget = metric.empTargetRaw;
       rawBaseline = metric.empBaselineRaw;
       targetLabel = 'EMP Target';
       baselineLabel = '2025-2026 (Yr 0)';
+
+      if (isDualUnit) {
+        activeUnitFormat = 'Count (Headcount)';
+        rawTarget = null; // EMP tracks headcount without separate percentage target
+      }
     } else if (isSp) {
       rawTarget = metric.spTargetRaw;
       rawBaseline = metric.spBaselineRaw;
       targetLabel = 'SP 2030 Target';
       baselineLabel = '2024-2025 (Yr 0)';
+
+      if (isDualUnit) {
+        // Requirement 1 Fix: In Strategic Plan, the metric is a percentage proportion (DataVista)
+        activeUnitFormat = 'Percentage';
+        // Effective actual in Strategic Plan is the Year 0 baseline proportion (e.g. 15.0%, 31.0%, 13.0%, 45.0%)
+        effectiveLatestActual = parseNumericValue(metric.spBaselineRaw);
+        companionHeadcount = metric.latestActual; // companion student count from Report Card
+      }
+    } else if (planName === 'Ongoing Report Card') {
+      // Ongoing Report Card tracks annual baseline performance; does not impose SP targets
+      rawTarget = isDualUnit ? null : metric.empTargetRaw;
+      rawBaseline = metric.history.length > 0 ? metric.history[0].value : null;
+      targetLabel = 'Report Card Target';
+      baselineLabel = '2020-2021 Baseline';
+
+      if (isDualUnit) {
+        activeUnitFormat = 'Count (Headcount)';
+        rawTarget = null; // No target horizon in Report Card headcount
+      }
     } else {
-      // Ongoing Report Card or All
-      rawTarget = metric.empTargetRaw || metric.spTargetRaw;
-      rawBaseline = metric.empBaselineRaw || metric.spBaselineRaw || (metric.history.length > 0 ? metric.history[0].value : null);
+      // ALL (Master Unified View)
+      if (isDualUnit) {
+        activeUnitFormat = 'Count (Headcount)';
+        rawTarget = null; // Avoid scale clash in unified view
+        companionHeadcount = metric.latestActual;
+      } else {
+        rawTarget = metric.empTargetRaw || metric.spTargetRaw;
+        rawBaseline = metric.empBaselineRaw || metric.spBaselineRaw || (metric.history.length > 0 ? metric.history[0].value : null);
+      }
       targetLabel = 'Target Horizon';
       baselineLabel = 'Baseline Year';
     }
@@ -476,13 +523,13 @@
 
     // Parse numeric target
     let target = null;
-    let targetDisplay = 'None Set';
+    let targetDisplay = 'No Target Set';
     if (rawTarget !== null && rawTarget !== undefined && rawTarget !== '') {
       targetDisplay = String(rawTarget).trim();
       target = parseTargetValue(rawTarget, baseline);
     }
 
-    const latestActual = metric.latestActual;
+    const latestActual = effectiveLatestActual;
     const isInverse = metric.isInverseMetric;
 
     // Numerical Gap & Progress Calculations
@@ -491,7 +538,16 @@
     let status = 'Tracking'; // 'On Track', 'Off Track', 'Goal Met', 'Tracking'
     let isAtRisk = false;
 
-    if (target !== null && latestActual !== null) {
+    // Requirement 2 Enforcement:
+    // If NO target horizon is set, the metric MUST strictly show as 'Tracking' (NEVER 'On Track', NEVER 'Needs Attention')
+    if (target === null || target === undefined || isNaN(target)) {
+      status = 'Tracking';
+      isAtRisk = false;
+      gap = null;
+      progressPct = null;
+      targetDisplay = 'No Target Set';
+    } else if (latestActual !== null) {
+      // Target IS set: Evaluate Goal Met, On Track, or Off Track
       if (isInverse) {
         // Lower is better (Units accumulated: target 76, baseline 81)
         gap = latestActual - target; // positive gap means excess units remain
@@ -517,7 +573,7 @@
         }
       } else {
         // Standard metric: Higher is better (or improving towards target)
-        gap = target - latestActual; // positive gap means remaining units needed
+        gap = target - latestActual; // positive gap means remaining distance to target
         const targetMet = latestActual >= target;
 
         if (targetMet) {
@@ -547,24 +603,13 @@
           }
         }
       }
-    } else if (latestActual !== null) {
-      // Baseline tracking without numeric target
-      if (baseline !== null) {
-        if (isInverse) {
-          status = latestActual > baseline ? 'Off Track' : 'On Track';
-          isAtRisk = latestActual > baseline;
-        } else {
-          status = latestActual < baseline ? 'Off Track' : 'On Track';
-          isAtRisk = latestActual < baseline;
-        }
-      } else if (metric.yoyDelta !== null) {
-        status = metric.yoyDelta >= 0 ? 'On Track' : 'Off Track';
-        isAtRisk = metric.yoyDelta < 0;
-      }
     }
 
     return {
       ...metric,
+      unitFormat: activeUnitFormat,
+      latestActual,
+      companionHeadcount,
       baseline,
       rawBaseline,
       target,
@@ -594,7 +639,7 @@
       const match = str.match(/(\d+(\.\d+)?)%/);
       const rate = match ? parseFloat(match[1]) / 100 : 0.01;
       if (baseline !== null && baseline > 0) {
-        // 5-year target horizon at compound or simple rate
+        // 5-year target horizon at compound rate
         return Math.round(baseline * Math.pow(1 + rate, 5) * 100) / 100;
       }
       return null;
@@ -624,6 +669,9 @@
   // 3. Filtering System & Cascading Logic
   // ============================================================================
 
+  /**
+   * Requirement 5: Semicolon-split Goals & Areas populated individually into dropdown.
+   */
   function populateFilterDropdowns() {
     // Determine metrics matching the active Plan
     const planMetrics = state.normalizedMetrics.filter(m => {
@@ -648,16 +696,19 @@
     });
     if (categorySet.has(currentCat)) elements.categoryFilter.value = currentCat;
 
-    // Populate Goals / Areas (cascades with active plan)
+    // Requirement 5: Parse and separate semicolon-delimited Goals and Plan Areas
     const goalSet = new Set();
     planMetrics.forEach(m => {
       if (state.activePlan === 'Educational Master Plan') {
-        if (m.empGoal) goalSet.add(m.empGoal);
+        m.empGoals.forEach(g => goalSet.add(g));
+        m.empPlanAreas.forEach(a => goalSet.add(a));
       } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
-        if (m.spGoal) goalSet.add(m.spGoal);
+        m.spGoals.forEach(g => goalSet.add(g));
+        m.spObjectives.forEach(o => goalSet.add(o));
       } else {
-        if (m.empGoal) goalSet.add(m.empGoal);
-        if (m.spGoal) goalSet.add(m.spGoal);
+        m.empGoals.forEach(g => goalSet.add(g));
+        m.spGoals.forEach(g => goalSet.add(g));
+        m.empPlanAreas.forEach(a => goalSet.add(a));
       }
     });
 
@@ -674,7 +725,8 @@
 
   /**
    * Filters the metrics list against all active criteria.
-   * Fulfills Acceptance Criterion: EMP dashboard + Course Success + Online Modality.
+   * - Requirement 3: When Highlight At-Risk is active, filters to show ONLY at-risk metrics.
+   * - Requirement 5: Matches against split individual goals and plan areas.
    */
   function getFilteredMetrics() {
     const plan = state.activePlan;
@@ -700,6 +752,11 @@
 
     // Step 3: Apply Filters
     return evaluatedList.filter(m => {
+      // Requirement 3: When Highlight At-Risk is toggled ON, ONLY show at-risk metrics
+      if (state.highlightAtRisk) {
+        if (!m.isAtRisk && m.status !== 'Off Track') return false;
+      }
+
       // Search input (ID, name, definition, pillar, category)
       if (f.search) {
         const query = f.search.toLowerCase();
@@ -717,11 +774,13 @@
         if (!catMatch) return false;
       }
 
-      // Goal Filter
+      // Requirement 5: Goal Filter (Matches against individual semicolon-split goals)
       if (f.goal) {
-        const goalMatch = (m.empGoal && m.empGoal === f.goal) ||
-                          (m.spGoal && m.spGoal === f.goal) ||
-                          (m.empPlanArea && m.empPlanArea.includes(f.goal));
+        const targetGoal = f.goal.toLowerCase();
+        const goalMatch = m.empGoals.some(g => g.toLowerCase() === targetGoal) ||
+                          m.spGoals.some(g => g.toLowerCase() === targetGoal) ||
+                          m.empPlanAreas.some(a => a.toLowerCase() === targetGoal) ||
+                          m.spObjectives.some(o => o.toLowerCase() === targetGoal);
         if (!goalMatch) return false;
       }
 
@@ -729,7 +788,7 @@
       if (f.modality) {
         const sub = m.subgroup.toLowerCase();
         const cat = m.categories.join(' ').toLowerCase();
-        const area = (m.empPlanArea || '').toLowerCase();
+        const area = (m.empPlanAreas.join(' ')).toLowerCase();
 
         if (f.modality === 'Online') {
           if (!sub.includes('online') && !cat.includes('online') && !area.includes('online')) return false;
@@ -769,7 +828,7 @@
         const match = m.subgroup.toLowerCase().includes('online');
         if (!match) return false;
       } else if (f.quickChip === 'at-risk') {
-        if (!m.isAtRisk) return false;
+        if (!m.isAtRisk && m.status !== 'Off Track') return false;
       } else if (f.quickChip === 'has-target') {
         if (m.target === null) return false;
       } else if (f.quickChip === 'enrollment') {
@@ -834,7 +893,8 @@
 
   /**
    * Dynamically calculates executive summary KPI metrics:
-   * Plan Health (% On Track), Total, At-Risk, Target Achieved, and Average Goal Progress.
+   * Plan Health (% On Track of target-bearing metrics), Total, At-Risk, Target Achieved, and Average Goal Progress.
+   * Requirement 2 & 7: Highlights active KPI card filters and correctly computes health.
    */
   function updateKpiSummary(metrics) {
     const total = metrics.length;
@@ -853,16 +913,21 @@
     let onTrackCount = 0;
     let atRiskCount = 0;
     let goalsMetCount = 0;
+    let trackingCount = 0;
     let progressSum = 0;
     let progressCount = 0;
 
     metrics.forEach(m => {
-      if (m.status === 'On Track') onTrackCount++;
       if (m.status === 'Goal Met') {
         goalsMetCount++;
-        onTrackCount++; // Met goals are also counted in overall positive health
+        onTrackCount++;
+      } else if (m.status === 'On Track') {
+        onTrackCount++;
+      } else if (m.status === 'Off Track' || m.isAtRisk) {
+        atRiskCount++;
+      } else {
+        trackingCount++; // Baseline tracking without numeric target
       }
-      if (m.isAtRisk || m.status === 'Off Track') atRiskCount++;
 
       if (m.progressPct !== null) {
         progressSum += m.progressPct;
@@ -870,14 +935,15 @@
       }
     });
 
-    const healthPct = Math.round((onTrackCount / total) * 100);
+    // Requirement 2: Health percentage calculated only among metrics that actually have target goals
+    const targetBearingTotal = onTrackCount + atRiskCount;
+    const healthPct = targetBearingTotal > 0 ? Math.round((onTrackCount / targetBearingTotal) * 100) : 100;
     const avgProgress = progressCount > 0 ? Math.round((progressSum / progressCount) * 10) / 10 : healthPct;
 
     // Update Plan Health Circular Gauge
     if (elements.kpiHealthPercent) elements.kpiHealthPercent.textContent = `${healthPct}%`;
     if (elements.kpiHealthCircle) {
       elements.kpiHealthCircle.setAttribute('stroke-dasharray', `${healthPct}, 100`);
-      // Update color based on health
       if (healthPct >= 75) {
         elements.kpiHealthCircle.style.stroke = 'var(--status-green)';
       } else if (healthPct >= 55) {
@@ -888,23 +954,45 @@
     }
 
     if (elements.kpiHealthHeadline) {
-      elements.kpiHealthHeadline.textContent = healthPct >= 80 ? 'Strong Trajectory' :
+      elements.kpiHealthHeadline.textContent = targetBearingTotal === 0 ? 'Baseline Tracking' :
+                                               healthPct >= 80 ? 'Strong Trajectory' :
                                                healthPct >= 65 ? 'Satisfactory Progress' : 'Requires Attention';
+    }
+
+    if (elements.kpiHealthDetail) {
+      elements.kpiHealthDetail.textContent = targetBearingTotal > 0 ?
+        `${onTrackCount} of ${targetBearingTotal} goal-bearing metrics on track` :
+        `${trackingCount} metrics tracking baseline (no targets set)`;
     }
 
     if (elements.kpiTotalMetrics) elements.kpiTotalMetrics.textContent = total;
     if (elements.kpiOnTrackCount) elements.kpiOnTrackCount.textContent = onTrackCount;
-    if (elements.kpiOnTrackPct) elements.kpiOnTrackPct.textContent = `${Math.round((onTrackCount / total) * 100)}% of filtered`;
+    if (elements.kpiOnTrackPct) elements.kpiOnTrackPct.textContent = targetBearingTotal > 0 ? `${healthPct}% of target-bearing` : 'Baseline Monitoring';
     if (elements.kpiAtRiskCount) elements.kpiAtRiskCount.textContent = atRiskCount;
-    if (elements.kpiAtRiskPct) elements.kpiAtRiskPct.textContent = atRiskCount > 0 ? `${atRiskCount} requiring review` : 'All metrics on target';
+    if (elements.kpiAtRiskPct) elements.kpiAtRiskPct.textContent = atRiskCount > 0 ? `${atRiskCount} requiring review` : 'All on target';
     if (elements.kpiGoalsMetCount) elements.kpiGoalsMetCount.textContent = goalsMetCount;
     if (elements.kpiAvgProgress) elements.kpiAvgProgress.textContent = `${avgProgress}%`;
     if (elements.kpiAvgProgressBar) elements.kpiAvgProgressBar.style.width = `${Math.min(avgProgress, 100)}%`;
 
-    // Alert Banner Management
-    if (state.highlightAtRisk && atRiskCount > 0) {
+    // Requirement 7: Synchronize active KPI filter styling
+    const activeStatus = state.activeFilters.status;
+    if (elements.kpiOnTrackCard) {
+      elements.kpiOnTrackCard.classList.toggle('active-kpi-filter', activeStatus === 'On Track');
+    }
+    if (elements.kpiAtRiskCard) {
+      elements.kpiAtRiskCard.classList.toggle('active-kpi-filter', activeStatus === 'Off Track' || state.highlightAtRisk);
+    }
+    if (elements.kpiGoalsMetCard) {
+      elements.kpiGoalsMetCard.classList.toggle('active-kpi-filter', activeStatus === 'Goal Met');
+    }
+    if (elements.kpiTotalCard) {
+      elements.kpiTotalCard.classList.toggle('active-kpi-filter', !activeStatus && !state.highlightAtRisk);
+    }
+
+    // Alert Banner Management (Requirement 3)
+    if (state.highlightAtRisk) {
       elements.atRiskAlertBanner.style.display = 'flex';
-      elements.atRiskAlertText.textContent = `Highlighting ${atRiskCount} off-track metrics whose latest actuals are moving away from target goals or underperforming baseline.`;
+      elements.atRiskAlertText.textContent = `Alert Filter Active: Displaying ${metrics.length} at-risk metric${metrics.length === 1 ? '' : 's'} requiring institutional intervention.`;
     } else {
       elements.atRiskAlertBanner.style.display = 'none';
     }
@@ -912,9 +1000,10 @@
 
   /**
    * Renders dedicated cards for each metric, complete with Chart.js visualization.
+   * Requirement 4: Clean top-bar layout preventing Metric ID and Plan pill overlaps.
+   * Requirement 6: Whole card is clickable to open details modal.
    */
   function renderMetricCards(metrics) {
-    // Destroy previous Chart.js instances to avoid memory leaks
     destroyAllCharts();
 
     const container = elements.metricsGridContainer;
@@ -941,21 +1030,20 @@
     const card = document.createElement('article');
     card.className = 'metric-card';
     card.setAttribute('data-id', metric.id);
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', `View details for ${metric.name}`);
 
-    // Apply Highlight At-Risk styling if active
-    if (state.highlightAtRisk) {
-      if (metric.isAtRisk) {
-        card.classList.add('at-risk-highlight');
-      } else {
-        card.classList.add('dimmed-non-risk');
-      }
+    // Highlight At-Risk styling
+    if (metric.isAtRisk || metric.status === 'Off Track') {
+      card.classList.add('at-risk-highlight');
     }
 
     const formattedActual = formatMetricValue(metric.latestActual, metric.unitFormat);
     const formattedTarget = metric.target !== null ? formatMetricValue(metric.target, metric.unitFormat) : metric.targetDisplay;
     const formattedBaseline = metric.baseline !== null ? formatMetricValue(metric.baseline, metric.unitFormat) : 'N/A';
 
-    // Status Badge Markup
+    // Status Badge Markup (Requirement 2: Tracking badge when no target)
     let statusClass = 'tracking';
     let statusLabel = 'Tracking';
     let statusIcon = 'fa-chart-line';
@@ -1024,15 +1112,30 @@
       return `<span class="plan-mini-tag">${escapeHtml(shortName)}</span>`;
     }).join('');
 
+    // Companion Headcount Subtext (Requirement 1)
+    let companionHtml = '';
+    if (metric.companionHeadcount !== null && metric.companionHeadcount !== undefined) {
+      companionHtml = `
+        <div class="companion-count-hint" style="font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+          <i class="fa-solid fa-users"></i> Companion Count: <strong>${Number(Math.round(metric.companionHeadcount)).toLocaleString()} students</strong>
+        </div>
+      `;
+    }
+
+    // Requirement 4: Top-bar structured in .card-identifiers-group with .id-pill-wrapper to avoid overlap
     card.innerHTML = `
       <div class="card-top-bar">
-        <div class="d-flex align-center gap-1">
-          <span class="id-pill">${escapeHtml(metric.id)}</span>
+        <div class="card-identifiers-group">
+          <div class="id-pill-wrapper">
+            <span class="id-pill">${escapeHtml(metric.id)}</span>
+          </div>
           <div class="plan-tags-cluster">${planTagsHtml}</div>
         </div>
-        <span class="status-badge ${statusClass}">
-          <i class="fa-solid ${statusIcon}"></i> ${statusLabel}
-        </span>
+        <div class="card-status-wrapper">
+          <span class="status-badge ${statusClass}">
+            <i class="fa-solid ${statusIcon}"></i> ${statusLabel}
+          </span>
+        </div>
       </div>
 
       <h3 class="card-metric-name" title="${escapeHtml(metric.name)}">${escapeHtml(metric.name)}</h3>
@@ -1049,6 +1152,8 @@
         </div>
         ${gapHtml}
       </div>
+
+      ${companionHtml}
 
       <div class="card-targets-row">
         <span class="target-stat">Baseline: <strong>${formattedBaseline}</strong></span>
@@ -1072,11 +1177,18 @@
       </div>
     `;
 
-    // Attach click listener for details
-    const detailsBtn = card.querySelector('[data-action="details"]');
-    if (detailsBtn) {
-      detailsBtn.addEventListener('click', () => openMetricModal(metric));
-    }
+    // Requirement 6: Clicking anywhere on the card opens the Details modal
+    card.addEventListener('click', () => {
+      openMetricModal(metric);
+    });
+
+    // Keyboard accessibility: Enter or Space triggers modal
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openMetricModal(metric);
+      }
+    });
 
     return card;
   }
@@ -1103,7 +1215,6 @@
     // If historical data is limited to 1 year, render a bar chart, else a curved line chart
     const chartType = metric.history.length > 2 ? 'line' : 'bar';
 
-    // Build annotations/target dataset if target is numeric
     const datasets = [
       {
         label: 'Actual Value',
@@ -1119,7 +1230,7 @@
       }
     ];
 
-    // Reference Target Line (if target exists and has matching scale)
+    // Reference Target Line (only if target exists and has matching scale)
     if (metric.target !== null && !isNaN(metric.target)) {
       datasets.push({
         label: metric.targetLabel,
@@ -1245,7 +1356,7 @@
     elements.modalDefinition.textContent = m.definition;
     elements.modalPillar.textContent = m.pillar;
     elements.modalPlanAlignment.textContent = m.plans.join(', ') || 'Districtwide Master Plan';
-    elements.modalGoalArea.textContent = m.empGoal || m.spGoal || m.empPlanArea || 'Institutional Performance';
+    elements.modalGoalArea.textContent = [...m.empGoals, ...m.spGoals, ...m.empPlanAreas].join('; ') || 'Institutional Performance';
     elements.modalDataSource.textContent = m.dataSource;
     elements.modalResponsible.textContent = m.responsible;
     elements.modalDisaggregation.textContent = m.subgroup || 'Total Districtwide';
@@ -1402,9 +1513,6 @@
   // 7. Export Functionality (html2canvas & jsPDF)
   // ============================================================================
 
-  /**
-   * Captures the visible dashboard DOM state and downloads as a PNG image.
-   */
   async function exportDashboardAsPng() {
     showToast('Generating high-resolution PNG snapshot...', 'info');
 
@@ -1412,9 +1520,8 @@
       const target = elements.dashboardCaptureTarget;
       const originalScrollTop = window.scrollY;
 
-      // Use html2canvas to rasterize
       const canvas = await html2canvas(target, {
-        scale: 2, // high DPI
+        scale: 2,
         useCORS: true,
         backgroundColor: state.theme === 'dark' ? '#0b1120' : '#f8fafc',
         logging: false
@@ -1437,9 +1544,6 @@
     }
   }
 
-  /**
-   * Captures the visible dashboard DOM state and compiles a multi-page PDF document.
-   */
   async function exportDashboardAsPdf() {
     showToast('Compiling executive PDF report...', 'info');
 
@@ -1549,7 +1653,7 @@
       });
     });
 
-    // Highlight At-Risk Toggle
+    // Requirement 3: Highlight At-Risk Toggle (Automatically filters to show ONLY At-Risk Metrics)
     elements.atRiskToggle.addEventListener('change', (e) => {
       state.highlightAtRisk = e.target.checked;
       renderDashboard();
@@ -1557,10 +1661,8 @@
 
     if (elements.filterAtRiskOnlyBtn) {
       elements.filterAtRiskOnlyBtn.addEventListener('click', () => {
-        state.activeFilters.quickChip = 'at-risk';
-        elements.quickChips.forEach(c => c.classList.remove('active'));
-        const chip = document.querySelector('[data-chip="at-risk"]');
-        if (chip) chip.classList.add('active');
+        state.highlightAtRisk = true;
+        elements.atRiskToggle.checked = true;
         renderDashboard();
       });
     }
@@ -1570,6 +1672,50 @@
         state.highlightAtRisk = false;
         elements.atRiskToggle.checked = false;
         renderDashboard();
+      });
+    }
+
+    // Requirement 7: KPI Quick View Card Filtering (ON TRACK, AT-RISK, TARGET ACHIEVED, TOTAL)
+    function toggleKpiStatusFilter(statusVal) {
+      if (state.activeFilters.status === statusVal) {
+        state.activeFilters.status = '';
+        elements.statusFilter.value = '';
+      } else {
+        state.activeFilters.status = statusVal;
+        elements.statusFilter.value = statusVal;
+      }
+      if (statusVal !== 'Off Track' && state.highlightAtRisk) {
+        state.highlightAtRisk = false;
+        elements.atRiskToggle.checked = false;
+      }
+      renderDashboard();
+    }
+
+    if (elements.kpiTotalCard) {
+      elements.kpiTotalCard.addEventListener('click', () => {
+        state.activeFilters.status = '';
+        elements.statusFilter.value = '';
+        state.highlightAtRisk = false;
+        elements.atRiskToggle.checked = false;
+        renderDashboard();
+      });
+    }
+
+    if (elements.kpiOnTrackCard) {
+      elements.kpiOnTrackCard.addEventListener('click', () => {
+        toggleKpiStatusFilter('On Track');
+      });
+    }
+
+    if (elements.kpiAtRiskCard) {
+      elements.kpiAtRiskCard.addEventListener('click', () => {
+        toggleKpiStatusFilter('Off Track');
+      });
+    }
+
+    if (elements.kpiGoalsMetCard) {
+      elements.kpiGoalsMetCard.addEventListener('click', () => {
+        toggleKpiStatusFilter('Goal Met');
       });
     }
 
@@ -1690,6 +1836,8 @@
       status: '',
       quickChip: 'all'
     };
+    state.highlightAtRisk = false;
+    if (elements.atRiskToggle) elements.atRiskToggle.checked = false;
 
     elements.metricSearchInput.value = '';
     elements.searchClearBtn.style.display = 'none';
@@ -1718,6 +1866,7 @@
     if (f.format) count++;
     if (f.status) count++;
     if (f.quickChip && f.quickChip !== 'all') count++;
+    if (state.highlightAtRisk) count++;
 
     if (elements.filterActiveCount) {
       elements.filterActiveCount.textContent = count === 0 ? '0 filters applied' : `${count} filter${count > 1 ? 's' : ''} applied`;
@@ -1725,16 +1874,27 @@
   }
 
   // ============================================================================
-  // Formatting Helpers & Utilities
+  // Formatting Helpers & Utilities (Requirement 1 Safeguard)
   // ============================================================================
 
+  /**
+   * Requirement 1 Safeguard: Prevents student headcounts from ever formatting as percentages.
+   */
   function formatMetricValue(val, unitFormat) {
     if (val === null || val === undefined || isNaN(val)) return '—';
 
     const format = (unitFormat || '').toLowerCase();
 
+    // Guard: If value is greater than 100 and unit mentions count or headcount, it is a student count!
+    if (val > 100 && (format.includes('count') || format.includes('headcount'))) {
+      return Number(Math.round(val)).toLocaleString();
+    }
+
     if (format.includes('percentage') || format.includes('percent')) {
-      // If stored as decimal like 0.759 -> 75.9%
+      // If value is greater than 1.0 and unit contains count, it is a headcount
+      if (val > 1.0 && format.includes('count')) {
+        return Number(Math.round(val)).toLocaleString();
+      }
       const pct = val <= 1 && val >= -1 ? val * 100 : val;
       return `${Math.round(pct * 10) / 10}%`;
     }
@@ -1750,8 +1910,8 @@
   function formatChartTick(val, unitFormat) {
     const format = (unitFormat || '').toLowerCase();
     if (format.includes('percentage')) {
-      const pct = val <= 1 && val >= -1 ? val * 100 : val;
-      return `${Math.round(pct)}%`;
+      if (val <= 1 && val >= -1) return `${Math.round(val * 100)}%`;
+      if (val <= 100 && !format.includes('count')) return `${Math.round(val)}%`;
     }
     if (val >= 1000) {
       return `${Math.round(val / 100) / 10}k`;
