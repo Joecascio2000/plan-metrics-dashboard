@@ -68,7 +68,7 @@
       targetCol: 'EMP Target Goal',
       goalCol: 'EMP Goal',
       areaCol: 'EMP Plan Area(s) (Values separated with ";")',
-      tags: ['100 Unified Metrics', 'Full Institutional Taxonomy', 'Master Data Sheet']
+      tags: ['100 Unified Metrics', 'Cross-Plan Taxonomy', 'Districtwide Metrics']
     }
   };
 
@@ -83,10 +83,10 @@
     activeFilters: {
       search: '',
       category: '',
-      goal: '',
-      modality: '',
       pillar: '',
-      format: '',
+      goal: '',
+      area: '',
+      modality: '',
       status: '',
       quickChip: 'all'
     },
@@ -150,20 +150,19 @@
     kpiAvgProgress: document.getElementById('kpiAvgProgress'),
     kpiAvgProgressBar: document.getElementById('kpiAvgProgressBar'),
 
-    // Alert Banner
-    atRiskAlertBanner: document.getElementById('atRiskAlertBanner'),
-    atRiskAlertText: document.getElementById('atRiskAlertText'),
-    filterAtRiskOnlyBtn: document.getElementById('filterAtRiskOnlyBtn'),
-    dismissAlertViewBtn: document.getElementById('dismissAlertViewBtn'),
+    // Sidebar & Collapsible Controls
+    dashboardSidebar: document.getElementById('dashboardSidebar'),
+    collapseSidebarBtn: document.getElementById('collapseSidebarBtn'),
+    expandSidebarBtn: document.getElementById('expandSidebarBtn'),
 
     // Filter Controls
     metricSearchInput: document.getElementById('metricSearchInput'),
     searchClearBtn: document.getElementById('searchClearBtn'),
     categoryFilter: document.getElementById('categoryFilter'),
-    goalFilter: document.getElementById('goalFilter'),
-    modalityFilter: document.getElementById('modalityFilter'),
     pillarFilter: document.getElementById('pillarFilter'),
-    formatFilter: document.getElementById('formatFilter'),
+    goalFilter: document.getElementById('goalFilter'),
+    areaFilter: document.getElementById('areaFilter'),
+    modalityFilter: document.getElementById('modalityFilter'),
     statusFilter: document.getElementById('statusFilter'),
     resetFiltersBtn: document.getElementById('resetFiltersBtn'),
     filterActiveCount: document.getElementById('filterActiveCount'),
@@ -670,23 +669,88 @@
   // ============================================================================
 
   /**
-   * Requirement 5: Semicolon-split Goals & Areas populated individually into dropdown.
+   * Helper to test whether a metric matches a selected modality / subgroup filter.
+   */
+  function matchesModality(m, modVal) {
+    if (!modVal) return true;
+    const sub = (m.subgroup || '').toLowerCase();
+    const cat = (m.categories || []).join(' ').toLowerCase();
+    const area = (m.empPlanAreas || []).join(' ').toLowerCase();
+    const name = (m.name || '').toLowerCase();
+    const traits = String(m.raw?.['Metric Trait(s) / Initiative Alignment (Values separated with ";")'] || '').toLowerCase();
+
+    switch (modVal) {
+      case 'Online':
+        return sub.includes('online') || cat.includes('online') || area.includes('online') || name.includes('online');
+      case 'In-Person':
+        return sub.includes('in-person') || name.includes('in-person');
+      case 'Hybrid':
+        return sub.includes('hybrid') || name.includes('hybrid');
+      case 'Total Districtwide':
+        return sub.includes('total') || sub.includes('districtwide');
+      case 'Locations':
+        return sub.includes('location') || sub.includes('chino') || sub.includes('fontana') || sub.includes('rancho') || area.includes('location');
+      case 'SCFF':
+        return traits.includes('scff') || sub.includes('scff');
+      case 'Demographics: Ethnicity':
+        return cat.includes('ethnicity') || sub.includes('ethnicity');
+      case 'Demographics: Gender':
+        return cat.includes('gender') || sub.includes('gender');
+      case 'Demographics: Age':
+        return cat.includes('age') || sub.includes('age');
+      case 'Special Populations':
+        return cat.includes('special populations') || sub.includes('population') || sub.includes('pell') || sub.includes('ccpg') || sub.includes('ab540');
+      case 'Transfer Destinations':
+        return cat.includes('transfer (by segment)') || sub.includes('destination');
+      case 'Term Status':
+        return cat.includes('term status') || sub.includes('terms:');
+      case 'Degrees & Certificates':
+        return sub.includes('degree') || sub.includes('certificate') || sub.includes('adt') || sub.includes('awards');
+      case 'Math & English':
+        return sub.includes('math') || sub.includes('english') || name.includes('math') || name.includes('english');
+      case 'Employees':
+        return sub.includes('employee') || name.includes('employee') || name.includes('faculty');
+      case 'Learning Outcomes':
+        return sub.includes('ilo') || name.includes('learning outcome') || name.includes('ilo');
+      case 'CPL':
+        return sub.includes('cpl') || name.includes('prior learning');
+      case 'Skill Tokens':
+        return sub.includes('token') || name.includes('skill token');
+      default:
+        return sub.includes(modVal.toLowerCase()) || name.toLowerCase().includes(modVal.toLowerCase());
+    }
+  }
+
+  /**
+   * Dynamically populates Category, Guided Pathways Pillar, Plan Goal, Plan Area/Objective,
+   * and Modality/Sub-Group dropdowns so ONLY relevant options present in the active plan appear.
+   * Fulfills:
+   * - Requirement 1: Separate filters for Goals and Areas
+   * - Requirement 6: Strategic Pillar then Plan Goal then Plan Area
+   * - Requirement 8: Only relevant options for active plan (no 0-result options)
    */
   function populateFilterDropdowns() {
     // Determine metrics matching the active Plan
     const planMetrics = state.normalizedMetrics.filter(m => {
       if (state.activePlan === 'ALL') return true;
-      return m.plans.some(p => p.toLowerCase().includes(state.activePlan.toLowerCase()) ||
-                              (state.activePlan.includes('EMP') && p.includes('Educational Master Plan')));
+      if (state.activePlan === 'Educational Master Plan') {
+        return m.plans.includes('Educational Master Plan');
+      }
+      if (state.activePlan === 'Strategic Plan (2026-2030)') {
+        return m.plans.some(p => p.includes('Strategic Plan'));
+      }
+      if (state.activePlan === 'Ongoing Report Card') {
+        return m.plans.includes('Ongoing Report Card');
+      }
+      return true;
     });
 
-    // Populate Categories (cascades with active plan)
+    // 1. Metric Categories (only those present in current plan)
     const categorySet = new Set();
     planMetrics.forEach(m => {
       m.categories.forEach(c => categorySet.add(c));
     });
-
-    const currentCat = elements.categoryFilter.value;
+    const currentCat = state.activeFilters.category;
     elements.categoryFilter.innerHTML = '<option value="">All Categories</option>';
     Array.from(categorySet).sort().forEach(cat => {
       const opt = document.createElement('option');
@@ -694,39 +758,141 @@
       opt.textContent = cat;
       elements.categoryFilter.appendChild(opt);
     });
-    if (categorySet.has(currentCat)) elements.categoryFilter.value = currentCat;
+    if (categorySet.has(currentCat)) {
+      elements.categoryFilter.value = currentCat;
+    } else {
+      state.activeFilters.category = '';
+    }
 
-    // Requirement 5: Parse and separate semicolon-delimited Goals and Plan Areas
+    // 2. Guided Pathways Pillars (only those present in current plan, split by ';')
+    const pillarSet = new Set();
+    planMetrics.forEach(m => {
+      if (m.pillar) {
+        m.pillar.split(';').map(p => p.trim()).filter(Boolean).forEach(p => pillarSet.add(p));
+      }
+    });
+    const currentPillar = state.activeFilters.pillar;
+    elements.pillarFilter.innerHTML = '<option value="">All Strategic Pillars</option>';
+    Array.from(pillarSet).sort().forEach(pillar => {
+      const opt = document.createElement('option');
+      opt.value = pillar;
+      opt.textContent = pillar;
+      elements.pillarFilter.appendChild(opt);
+    });
+    if (pillarSet.has(currentPillar)) {
+      elements.pillarFilter.value = currentPillar;
+    } else {
+      state.activeFilters.pillar = '';
+    }
+
+    // 3. Plan Goals (only goals present in current plan, split by ';')
     const goalSet = new Set();
     planMetrics.forEach(m => {
       if (state.activePlan === 'Educational Master Plan') {
         m.empGoals.forEach(g => goalSet.add(g));
-        m.empPlanAreas.forEach(a => goalSet.add(a));
       } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
         m.spGoals.forEach(g => goalSet.add(g));
-        m.spObjectives.forEach(o => goalSet.add(o));
+      } else if (state.activePlan === 'Ongoing Report Card') {
+        m.empGoals.forEach(g => goalSet.add(g));
       } else {
         m.empGoals.forEach(g => goalSet.add(g));
         m.spGoals.forEach(g => goalSet.add(g));
-        m.empPlanAreas.forEach(a => goalSet.add(a));
       }
     });
-
-    const currentGoal = elements.goalFilter.value;
-    elements.goalFilter.innerHTML = '<option value="">All Plan Goals & Areas</option>';
+    const currentGoal = state.activeFilters.goal;
+    elements.goalFilter.innerHTML = '<option value="">All Plan Goals</option>';
     Array.from(goalSet).sort().forEach(goal => {
       const opt = document.createElement('option');
       opt.value = goal;
       opt.textContent = goal;
       elements.goalFilter.appendChild(opt);
     });
-    if (goalSet.has(currentGoal)) elements.goalFilter.value = currentGoal;
+    if (goalSet.has(currentGoal)) {
+      elements.goalFilter.value = currentGoal;
+    } else {
+      state.activeFilters.goal = '';
+    }
+
+    // 4. Plan Areas / Objectives (only areas/objectives present in current plan, split by ';')
+    const areaSet = new Set();
+    planMetrics.forEach(m => {
+      if (state.activePlan === 'Educational Master Plan') {
+        m.empPlanAreas.forEach(a => areaSet.add(a));
+      } else if (state.activePlan === 'Strategic Plan (2026-2030)') {
+        m.spObjectives.forEach(o => areaSet.add(o));
+      } else if (state.activePlan === 'Ongoing Report Card') {
+        m.empPlanAreas.forEach(a => areaSet.add(a));
+      } else {
+        m.empPlanAreas.forEach(a => areaSet.add(a));
+        m.spObjectives.forEach(o => areaSet.add(o));
+      }
+    });
+    if (elements.areaFilter) {
+      const currentArea = state.activeFilters.area;
+      elements.areaFilter.innerHTML = '<option value="">All Plan Areas & Objectives</option>';
+      Array.from(areaSet).sort().forEach(area => {
+        const opt = document.createElement('option');
+        opt.value = area;
+        opt.textContent = area;
+        elements.areaFilter.appendChild(opt);
+      });
+      if (areaSet.has(currentArea)) {
+        elements.areaFilter.value = currentArea;
+      } else {
+        state.activeFilters.area = '';
+      }
+    }
+
+    // 5. Modality / Subgroup Filter (Only options that have >= 1 matching metric in the active plan)
+    const CANDIDATE_MODALITIES = [
+      { key: 'Online', label: 'Modality: Online' },
+      { key: 'In-Person', label: 'Modality: In-Person' },
+      { key: 'Hybrid', label: 'Modality: Hybrid' },
+      { key: 'Total Districtwide', label: 'Total Districtwide' },
+      { key: 'Locations', label: 'Campus Locations (Chino / Fontana)' },
+      { key: 'SCFF', label: 'SCFF / Funding Formula Aligned' },
+      { key: 'Math & English', label: 'Transfer-Level Math & English' },
+      { key: 'Degrees & Certificates', label: 'Degree & Certificate Attainment' },
+      { key: 'Employees', label: 'All Employees & Faculty' },
+      { key: 'Learning Outcomes', label: 'Learning Outcomes (ILOs)' },
+      { key: 'CPL', label: 'Credit for Prior Learning (CPL)' },
+      { key: 'Skill Tokens', label: 'Skill Tokens' },
+      { key: 'Demographics: Ethnicity', label: 'Demographics: Ethnicity' },
+      { key: 'Demographics: Gender', label: 'Demographics: Gender' },
+      { key: 'Demographics: Age', label: 'Demographics: Age Groups' },
+      { key: 'Special Populations', label: 'Special Populations (EOPS, DSPS, Veterans, Foster)' },
+      { key: 'Transfer Destinations', label: 'Transfer Destinations (CSU, UC, Out-of-State)' },
+      { key: 'Term Status', label: 'Term Enrollment Status (Full/Part Time)' }
+    ];
+
+    const currentMod = state.activeFilters.modality;
+    elements.modalityFilter.innerHTML = '<option value="">All Modalities & Groups</option>';
+    let modStillValid = false;
+
+    CANDIDATE_MODALITIES.forEach(({ key, label }) => {
+      // Test if any metric in planMetrics matches this modality
+      const matchCount = planMetrics.filter(m => matchesModality(m, key)).length;
+      if (matchCount > 0) {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = `${label} (${matchCount})`;
+        elements.modalityFilter.appendChild(opt);
+        if (key === currentMod) modStillValid = true;
+      }
+    });
+
+    if (modStillValid) {
+      elements.modalityFilter.value = currentMod;
+    } else {
+      state.activeFilters.modality = '';
+    }
   }
 
   /**
    * Filters the metrics list against all active criteria.
    * - Requirement 3: When Highlight At-Risk is active, filters to show ONLY at-risk metrics.
-   * - Requirement 5: Matches against split individual goals and plan areas.
+   * - Requirement 1 & 5: Matches against separated individual goals and plan areas.
+   * - Requirement 8: Evaluates modalities and subgroups dynamically.
    */
   function getFilteredMetrics() {
     const plan = state.activePlan;
@@ -770,39 +936,8 @@
 
       // Category Filter
       if (f.category) {
-        const catMatch = m.categories.some(c => c.toLowerCase().includes(f.category.toLowerCase()));
+        const catMatch = m.categories.some(c => c.toLowerCase() === f.category.toLowerCase());
         if (!catMatch) return false;
-      }
-
-      // Requirement 5: Goal Filter (Matches against individual semicolon-split goals)
-      if (f.goal) {
-        const targetGoal = f.goal.toLowerCase();
-        const goalMatch = m.empGoals.some(g => g.toLowerCase() === targetGoal) ||
-                          m.spGoals.some(g => g.toLowerCase() === targetGoal) ||
-                          m.empPlanAreas.some(a => a.toLowerCase() === targetGoal) ||
-                          m.spObjectives.some(o => o.toLowerCase() === targetGoal);
-        if (!goalMatch) return false;
-      }
-
-      // Modality / Group Filter (Special attention to Online vs In-Person)
-      if (f.modality) {
-        const sub = m.subgroup.toLowerCase();
-        const cat = m.categories.join(' ').toLowerCase();
-        const area = (m.empPlanAreas.join(' ')).toLowerCase();
-
-        if (f.modality === 'Online') {
-          if (!sub.includes('online') && !cat.includes('online') && !area.includes('online')) return false;
-        } else if (f.modality === 'In-Person') {
-          if (!sub.includes('in-person')) return false;
-        } else if (f.modality === 'Hybrid') {
-          if (!sub.includes('hybrid')) return false;
-        } else if (f.modality === 'Total Districtwide') {
-          if (!sub.includes('total') && !sub.includes('districtwide')) return false;
-        } else if (f.modality.includes('Location')) {
-          if (!sub.includes('location') && !sub.includes('chino') && !sub.includes('fontana')) return false;
-        } else if (f.modality.includes('SCFF')) {
-          if (!sub.includes('scff') && !(m.raw['Metric Trait(s) / Initiative Alignment (Values separated with ";")'] || '').includes('SCFF')) return false;
-        }
       }
 
       // Strategic Pillar Filter
@@ -810,9 +945,25 @@
         if (!m.pillar.toLowerCase().includes(f.pillar.toLowerCase())) return false;
       }
 
-      // Metric Format / Unit Filter
-      if (f.format) {
-        if (!m.unitFormat.toLowerCase().includes(f.format.toLowerCase())) return false;
+      // Requirement 1 & 5: Goal Filter (Matches against individual semicolon-split goals)
+      if (f.goal) {
+        const targetGoal = f.goal.toLowerCase();
+        const goalMatch = m.empGoals.some(g => g.toLowerCase() === targetGoal) ||
+                          m.spGoals.some(g => g.toLowerCase() === targetGoal);
+        if (!goalMatch) return false;
+      }
+
+      // Requirement 1: Separate Plan Area / Objective Filter
+      if (f.area) {
+        const targetArea = f.area.toLowerCase();
+        const areaMatch = m.empPlanAreas.some(a => a.toLowerCase() === targetArea) ||
+                          m.spObjectives.some(o => o.toLowerCase() === targetArea);
+        if (!areaMatch) return false;
+      }
+
+      // Modality / Sub-Group Filter (Dynamic matching)
+      if (f.modality) {
+        if (!matchesModality(m, f.modality)) return false;
       }
 
       // Status Filter
@@ -825,8 +976,7 @@
         const match = m.categories.some(c => c.toLowerCase().includes('course success'));
         if (!match) return false;
       } else if (f.quickChip === 'online-modality') {
-        const match = m.subgroup.toLowerCase().includes('online');
-        if (!match) return false;
+        if (!matchesModality(m, 'Online')) return false;
       } else if (f.quickChip === 'at-risk') {
         if (!m.isAtRisk && m.status !== 'Off Track') return false;
       } else if (f.quickChip === 'has-target') {
@@ -987,14 +1137,6 @@
     }
     if (elements.kpiTotalCard) {
       elements.kpiTotalCard.classList.toggle('active-kpi-filter', !activeStatus && !state.highlightAtRisk);
-    }
-
-    // Alert Banner Management (Requirement 3)
-    if (state.highlightAtRisk) {
-      elements.atRiskAlertBanner.style.display = 'flex';
-      elements.atRiskAlertText.textContent = `Alert Filter Active: Displaying ${metrics.length} at-risk metric${metrics.length === 1 ? '' : 's'} requiring institutional intervention.`;
-    } else {
-      elements.atRiskAlertBanner.style.display = 'none';
     }
   }
 
@@ -1642,38 +1784,46 @@
         tab.classList.add('active');
         state.activePlan = tab.getAttribute('data-plan');
 
-        // Reset category and goal filters when switching plans to prevent mismatched cascading
+        // Reset cascading filters when switching plans to prevent mismatched cascading
         elements.categoryFilter.value = '';
+        elements.pillarFilter.value = '';
         elements.goalFilter.value = '';
+        if (elements.areaFilter) elements.areaFilter.value = '';
+        elements.modalityFilter.value = '';
         state.activeFilters.category = '';
+        state.activeFilters.pillar = '';
         state.activeFilters.goal = '';
+        state.activeFilters.area = '';
+        state.activeFilters.modality = '';
 
         populateFilterDropdowns();
         renderDashboard();
       });
     });
 
+    // Sidebar Collapse / Expand (Requirement 2)
+    if (elements.collapseSidebarBtn && elements.dashboardSidebar) {
+      elements.collapseSidebarBtn.addEventListener('click', () => {
+        elements.dashboardSidebar.classList.add('collapsed');
+        if (elements.expandSidebarBtn) elements.expandSidebarBtn.style.display = 'inline-flex';
+        // Trigger resize so Chart.js cards dynamically reflow to fill space
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+      });
+    }
+
+    if (elements.expandSidebarBtn && elements.dashboardSidebar) {
+      elements.expandSidebarBtn.addEventListener('click', () => {
+        elements.dashboardSidebar.classList.remove('collapsed');
+        elements.expandSidebarBtn.style.display = 'none';
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
+      });
+    }
+
     // Requirement 3: Highlight At-Risk Toggle (Automatically filters to show ONLY At-Risk Metrics)
     elements.atRiskToggle.addEventListener('change', (e) => {
       state.highlightAtRisk = e.target.checked;
       renderDashboard();
     });
-
-    if (elements.filterAtRiskOnlyBtn) {
-      elements.filterAtRiskOnlyBtn.addEventListener('click', () => {
-        state.highlightAtRisk = true;
-        elements.atRiskToggle.checked = true;
-        renderDashboard();
-      });
-    }
-
-    if (elements.dismissAlertViewBtn) {
-      elements.dismissAlertViewBtn.addEventListener('click', () => {
-        state.highlightAtRisk = false;
-        elements.atRiskToggle.checked = false;
-        renderDashboard();
-      });
-    }
 
     // Requirement 7: KPI Quick View Card Filtering (ON TRACK, AT-RISK, TARGET ACHIEVED, TOTAL)
     function toggleKpiStatusFilter(statusVal) {
@@ -1758,23 +1908,25 @@
       renderDashboard();
     });
 
-    elements.goalFilter.addEventListener('change', (e) => {
-      state.activeFilters.goal = e.target.value;
-      renderDashboard();
-    });
-
-    elements.modalityFilter.addEventListener('change', (e) => {
-      state.activeFilters.modality = e.target.value;
-      renderDashboard();
-    });
-
     elements.pillarFilter.addEventListener('change', (e) => {
       state.activeFilters.pillar = e.target.value;
       renderDashboard();
     });
 
-    elements.formatFilter.addEventListener('change', (e) => {
-      state.activeFilters.format = e.target.value;
+    elements.goalFilter.addEventListener('change', (e) => {
+      state.activeFilters.goal = e.target.value;
+      renderDashboard();
+    });
+
+    if (elements.areaFilter) {
+      elements.areaFilter.addEventListener('change', (e) => {
+        state.activeFilters.area = e.target.value;
+        renderDashboard();
+      });
+    }
+
+    elements.modalityFilter.addEventListener('change', (e) => {
+      state.activeFilters.modality = e.target.value;
       renderDashboard();
     });
 
@@ -1829,10 +1981,10 @@
     state.activeFilters = {
       search: '',
       category: '',
-      goal: '',
-      modality: '',
       pillar: '',
-      format: '',
+      goal: '',
+      area: '',
+      modality: '',
       status: '',
       quickChip: 'all'
     };
@@ -1842,10 +1994,10 @@
     elements.metricSearchInput.value = '';
     elements.searchClearBtn.style.display = 'none';
     elements.categoryFilter.value = '';
-    elements.goalFilter.value = '';
-    elements.modalityFilter.value = '';
     elements.pillarFilter.value = '';
-    elements.formatFilter.value = '';
+    elements.goalFilter.value = '';
+    if (elements.areaFilter) elements.areaFilter.value = '';
+    elements.modalityFilter.value = '';
     elements.statusFilter.value = '';
 
     elements.quickChips.forEach(c => c.classList.remove('active'));
@@ -1860,10 +2012,10 @@
     const f = state.activeFilters;
     if (f.search) count++;
     if (f.category) count++;
-    if (f.goal) count++;
-    if (f.modality) count++;
     if (f.pillar) count++;
-    if (f.format) count++;
+    if (f.goal) count++;
+    if (f.area) count++;
+    if (f.modality) count++;
     if (f.status) count++;
     if (f.quickChip && f.quickChip !== 'all') count++;
     if (state.highlightAtRisk) count++;
