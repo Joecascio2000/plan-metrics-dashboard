@@ -113,38 +113,42 @@
     <!-- Plan Navigation Tabs -->
     <nav class="plan-tabs-bar" aria-label="Institutional Plans">
       <div class="plan-tabs-scroll">
-        <button class="plan-tab active" data-plan="Educational Master Plan" id="tab-emp">
+        <!-- 1. All Plans (Master View) - First & Active by Default -->
+        <button class="plan-tab active" data-plan="ALL" id="tab-all">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>All Plans (Master View)</span>
+          <span class="plan-count-pill" id="allCountPill">42</span>
+        </button>
+        <!-- 2. Educational Master Plan (EMP) -->
+        <button class="plan-tab" data-plan="Educational Master Plan" id="tab-emp">
           <i class="fa-solid fa-compass"></i>
           <span>Educational Master Plan (EMP)</span>
           <span class="plan-count-pill" id="empCountPill">29</span>
         </button>
+        <!-- 3. Strategic Plan (2026–2030) -->
         <button class="plan-tab" data-plan="Strategic Plan (2026-2030)" id="tab-sp">
           <i class="fa-solid fa-bullseye"></i>
           <span>Strategic Plan (2026–2030)</span>
           <span class="plan-count-pill" id="spCountPill">16</span>
         </button>
-        <button class="plan-tab" data-plan="Ongoing Report Card" id="tab-rc">
+        <!-- 4. Ongoing Report Card (Configurable; hidden by default) -->
+        <button class="plan-tab" data-plan="Ongoing Report Card" id="tab-rc" style="display: none;">
           <i class="fa-solid fa-chart-line"></i>
           <span>Ongoing Report Card</span>
           <span class="plan-count-pill" id="rcCountPill">78</span>
         </button>
-        <button class="plan-tab" data-plan="ALL" id="tab-all">
-          <i class="fa-solid fa-layer-group"></i>
-          <span>All Plans (Master View)</span>
-          <span class="plan-count-pill" id="allCountPill">100</span>
-        </button>
       </div>
     </nav>
 
-    <!-- Plan Overview & Horizon Banner -->
+    <!-- Plan Overview & Horizon Banner (Defaults to All Plans Master View) -->
     <section class="plan-horizon-banner" id="planHorizonBanner">
       <div class="horizon-text">
-        <h2 id="planTitleDisplay">Educational Master Plan (EMP)</h2>
-        <p id="planDescDisplay">Tracking long-range educational capacity, scheduling efficiency, course success, and equitable student access aligned with Chaffey College 2025–2026 baseline horizons.</p>
+        <h2 id="planTitleDisplay">All Institutional Plans (Unified Master View)</h2>
+        <p id="planDescDisplay">Cross-functional institutional matrix unifying metrics across the Educational Master Plan and Strategic Plan (2026–2030).</p>
       </div>
       <div class="horizon-tags" id="horizonTags">
-        <span class="horizon-tag"><i class="fa-solid fa-calendar-check"></i> Baseline: 2025-2026 (Yr 0)</span>
-        <span class="horizon-tag"><i class="fa-solid fa-flag-checkered"></i> EMP Target Goals</span>
+        <span class="horizon-tag"><i class="fa-solid fa-layer-group"></i> Unified Institutional Plans</span>
+        <span class="horizon-tag"><i class="fa-solid fa-compass"></i> Strategic &amp; EMP Alignment</span>
       </div>
     </section>
 
