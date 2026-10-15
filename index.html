@@ -145,7 +145,6 @@
       <div class="horizon-tags" id="horizonTags">
         <span class="horizon-tag"><i class="fa-solid fa-calendar-check"></i> Baseline: 2025-2026 (Yr 0)</span>
         <span class="horizon-tag"><i class="fa-solid fa-flag-checkered"></i> EMP Target Goals</span>
-        <span class="horizon-tag"><i class="fa-solid fa-database"></i> Source: Master Sheet</span>
       </div>
     </section>
 
@@ -218,10 +217,11 @@
           <div class="kpi-value text-chaffey" id="kpiGoalsMetCount">7</div>
           <span class="kpi-subtext" id="kpiGoalsMetSub">Target goal exceeded</span>
           <span class="kpi-filter-hint"><i class="fa-solid fa-filter"></i> Click to filter</span>
+        </div>
       </div>
 
       <!-- Average Progress Toward Target -->
-      <div class="kpi-card">
+      <div class="kpi-card" id="kpiProgressCard">
         <div class="kpi-icon-badge bg-purple-subtle text-purple">
           <i class="fa-solid fa-chart-pie"></i>
         </div>
@@ -235,150 +235,136 @@
       </div>
     </section>
 
-    <!-- At-Risk Alert Banner (Active when toggle is ON) -->
-    <div class="alert-banner" id="atRiskAlertBanner" style="display: none;">
-      <div class="alert-content">
-        <i class="fa-solid fa-triangle-exclamation alert-banner-icon"></i>
-        <div class="alert-text">
-          <strong>Institutional Alert Mode Active:</strong>
-          <span id="atRiskAlertText">Highlighting 5 off-track metrics whose latest actuals are moving away from target goals or underperforming baseline.</span>
-        </div>
-      </div>
-      <div class="alert-actions">
-        <button class="btn btn-sm btn-outline-white" id="filterAtRiskOnlyBtn">Show Only At-Risk</button>
-        <button class="btn btn-sm btn-ghost-white" id="dismissAlertViewBtn"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-    </div>
+    <!-- Main Dashboard Body with Collapsible Sidebar & Dynamic Cards Grid -->
+    <div class="dashboard-body-layout" id="dashboardBodyLayout">
 
-    <!-- Interactive Filtering System (Cascading by Plan) -->
-    <section class="filter-panel" id="filterPanel">
-      <div class="filter-panel-header">
-        <div class="filter-header-title">
-          <i class="fa-solid fa-filter text-chaffey"></i>
-          <span>Dashboard Filters</span>
-          <span class="filter-active-count" id="filterActiveCount">0 filters applied</span>
+      <!-- Collapsible Left Filter Sidebar -->
+      <aside class="dashboard-sidebar" id="dashboardSidebar" aria-label="Filters Sidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-title">
+            <i class="fa-solid fa-sliders text-chaffey"></i>
+            <span>Dashboard Filters</span>
+          </div>
+          <button class="btn-sidebar-collapse" id="collapseSidebarBtn" title="Hide Filters" aria-label="Hide Filters">
+            <i class="fa-solid fa-chevron-left"></i>
+          </button>
         </div>
-        <button class="btn btn-ghost btn-sm" id="resetFiltersBtn">
-          <i class="fa-solid fa-rotate-left"></i> Reset Filters
-        </button>
-      </div>
 
-      <div class="filter-grid">
-        <!-- Search Input -->
-        <div class="filter-item filter-search-span">
-          <label for="metricSearchInput" class="filter-label">Search Metrics</label>
-          <div class="search-input-wrap">
-            <i class="fa-solid fa-magnifying-glass search-icon"></i>
-            <input type="text" id="metricSearchInput" placeholder="Search by ID (e.g. M-012), name, definition, or keyword...">
-            <button class="search-clear-btn" id="searchClearBtn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+        <div class="sidebar-filters-body">
+          <!-- Active filter status pill & Reset Button -->
+          <div class="sidebar-filter-actions">
+            <span class="filter-active-count" id="filterActiveCount">0 filters applied</span>
+            <button class="btn btn-ghost btn-sm" id="resetFiltersBtn">
+              <i class="fa-solid fa-rotate-left"></i> Reset
+            </button>
+          </div>
+
+          <!-- Search Input -->
+          <div class="sidebar-filter-item">
+            <label for="metricSearchInput" class="filter-label">Search Metrics</label>
+            <div class="search-input-wrap">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" id="metricSearchInput" placeholder="ID (e.g. M-012), name, keywords...">
+              <button class="search-clear-btn" id="searchClearBtn" style="display:none;"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+          </div>
+
+          <!-- Category Filter -->
+          <div class="sidebar-filter-item">
+            <label for="categoryFilter" class="filter-label">Metric Category</label>
+            <select id="categoryFilter" class="filter-select">
+              <option value="">All Categories</option>
+            </select>
+          </div>
+
+          <!-- Strategic Pillar (Guided Pathways) Filter -->
+          <div class="sidebar-filter-item">
+            <label for="pillarFilter" class="filter-label">Strategic Pillar (Guided Pathways)</label>
+            <select id="pillarFilter" class="filter-select">
+              <option value="">All Strategic Pillars</option>
+            </select>
+          </div>
+
+          <!-- Plan Goal Filter (Placed immediately underneath Strategic Pillar) -->
+          <div class="sidebar-filter-item">
+            <label for="goalFilter" class="filter-label">Plan Goal</label>
+            <select id="goalFilter" class="filter-select">
+              <option value="">All Plan Goals</option>
+            </select>
+          </div>
+
+          <!-- Plan Area / Objective Filter (Separate from Goal) -->
+          <div class="sidebar-filter-item">
+            <label for="areaFilter" class="filter-label">Plan Area / Objective</label>
+            <select id="areaFilter" class="filter-select">
+              <option value="">All Plan Areas &amp; Objectives</option>
+            </select>
+          </div>
+
+          <!-- Modality / Subgroup Filter (Populated dynamically with relevant options only) -->
+          <div class="sidebar-filter-item">
+            <label for="modalityFilter" class="filter-label">Modality / Sub-Group</label>
+            <select id="modalityFilter" class="filter-select">
+              <option value="">All Modalities &amp; Groups</option>
+            </select>
+          </div>
+
+          <!-- Goal Status Filter -->
+          <div class="sidebar-filter-item">
+            <label for="statusFilter" class="filter-label">Goal Status</label>
+            <select id="statusFilter" class="filter-select">
+              <option value="">All Statuses</option>
+              <option value="On Track">On Track</option>
+              <option value="Off Track">Off Track / At Risk</option>
+              <option value="Goal Met">Goal Achieved</option>
+              <option value="Tracking">Baseline Tracking</option>
+            </select>
+          </div>
+
+          <!-- Quick Filter Chips -->
+          <div class="sidebar-quick-chips">
+            <span class="chips-label">Quick Filters:</span>
+            <div class="quick-chips-grid">
+              <button class="chip-btn active" data-chip="all">All</button>
+              <button class="chip-btn" data-chip="course-success"><i class="fa-solid fa-graduation-cap"></i> Course Success</button>
+              <button class="chip-btn" data-chip="online-modality"><i class="fa-solid fa-laptop"></i> Online Only</button>
+              <button class="chip-btn" data-chip="at-risk"><i class="fa-solid fa-triangle-exclamation text-amber"></i> Needs Attention</button>
+              <button class="chip-btn" data-chip="has-target"><i class="fa-solid fa-bullseye"></i> With Targets</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Content Area: Cards Grid & Results Header -->
+      <section class="dashboard-content-area" id="dashboardContentArea">
+        <div class="metrics-grid-header">
+          <div class="metrics-results-info">
+            <button class="btn btn-secondary btn-sm sidebar-expand-btn" id="expandSidebarBtn" style="display:none;" title="Show Filters">
+              <i class="fa-solid fa-sliders"></i>
+              <span>Show Filters</span>
+            </button>
+            <span>Showing <strong id="displayedMetricsCount">29</strong> institutional metrics</span>
+          </div>
+          <div class="view-density-controls">
+            <button class="density-btn active" id="viewGridBtn" title="Grid View"><i class="fa-solid fa-grip"></i></button>
+            <button class="density-btn" id="viewListBtn" title="Compact Table / List View"><i class="fa-solid fa-list"></i></button>
           </div>
         </div>
 
-        <!-- Primary Filter: Category (Cascading) -->
-        <div class="filter-item">
-          <label for="categoryFilter" class="filter-label">Metric Category</label>
-          <select id="categoryFilter" class="filter-select">
-            <option value="">All Categories</option>
-          </select>
+        <!-- Grid of Metric Cards -->
+        <div class="metrics-grid" id="metricsGridContainer">
+          <!-- Dynamically populated by app.js -->
         </div>
 
-        <!-- Primary Filter: Goal / Area (Cascading) -->
-        <div class="filter-item">
-          <label for="goalFilter" class="filter-label">Plan Goal / Area</label>
-          <select id="goalFilter" class="filter-select">
-            <option value="">All Plan Goals &amp; Areas</option>
-          </select>
+        <!-- Empty State -->
+        <div class="empty-state" id="emptyState" style="display:none;">
+          <div class="empty-icon"><i class="fa-solid fa-filter-circle-xmark"></i></div>
+          <h3>No matching metrics found</h3>
+          <p>No metrics match the selected plan and filter criteria. Try adjusting or clearing your filters.</p>
+          <button class="btn btn-primary btn-sm" id="emptyResetBtn">Reset All Filters</button>
         </div>
-
-        <!-- Secondary Filter: Modality / Group (Acceptance Criteria Focus) -->
-        <div class="filter-item">
-          <label for="modalityFilter" class="filter-label">Modality / Sub-Group</label>
-          <select id="modalityFilter" class="filter-select">
-            <option value="">All Modalities &amp; Groups</option>
-            <option value="Online">Online Modality</option>
-            <option value="In-Person">In-Person Modality</option>
-            <option value="Hybrid">Hybrid Modality</option>
-            <option value="Total Districtwide">Total Districtwide</option>
-            <option value="Location: Chino Campus">Location: Chino Campus</option>
-            <option value="Location: Fontana Campus">Location: Fontana Campus</option>
-            <option value="SCFF Population">SCFF Populations</option>
-          </select>
-        </div>
-
-        <!-- Secondary Filter: Guided Pathways Pillar -->
-        <div class="filter-item">
-          <label for="pillarFilter" class="filter-label">Strategic Pillar (Guided Pathways)</label>
-          <select id="pillarFilter" class="filter-select">
-            <option value="">All Strategic Pillars</option>
-            <option value="Pillar I">Pillar I. Clarify the Path</option>
-            <option value="Pillar II">Pillar II. Enter the Path</option>
-            <option value="Pillar III">Pillar III. Stay on the Path</option>
-            <option value="Pillar IV">Pillar IV. Ensure Learning</option>
-          </select>
-        </div>
-
-        <!-- Secondary Filter: Metric Unit / Format -->
-        <div class="filter-item">
-          <label for="formatFilter" class="filter-label">Metric Type / Format</label>
-          <select id="formatFilter" class="filter-select">
-            <option value="">All Metric Formats</option>
-            <option value="Percentage">Percentage (%)</option>
-            <option value="Count">Count / Headcount</option>
-            <option value="Ratio">Ratio / Number</option>
-            <option value="Decimal (FTES)">Decimal (FTES)</option>
-          </select>
-        </div>
-
-        <!-- Secondary Filter: Goal Status -->
-        <div class="filter-item">
-          <label for="statusFilter" class="filter-label">Goal Status</label>
-          <select id="statusFilter" class="filter-select">
-            <option value="">All Statuses</option>
-            <option value="On Track">On Track</option>
-            <option value="Off Track">Off Track / At Risk</option>
-            <option value="Goal Met">Goal Achieved</option>
-            <option value="Tracking">Baseline Tracking</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- Quick Filter Chips -->
-      <div class="quick-chips-bar">
-        <span class="chips-label">Quick Filters:</span>
-        <button class="chip-btn active" data-chip="all">All</button>
-        <button class="chip-btn" data-chip="course-success"><i class="fa-solid fa-graduation-cap"></i> Course Success</button>
-        <button class="chip-btn" data-chip="online-modality"><i class="fa-solid fa-laptop"></i> Online Modality</button>
-        <button class="chip-btn" data-chip="at-risk"><i class="fa-solid fa-triangle-exclamation text-amber"></i> Needs Attention</button>
-        <button class="chip-btn" data-chip="has-target"><i class="fa-solid fa-bullseye"></i> With Defined Targets</button>
-        <button class="chip-btn" data-chip="enrollment"><i class="fa-solid fa-users"></i> Enrollment &amp; FTES</button>
-      </div>
-    </section>
-
-    <!-- Metrics Cards Grid -->
-    <section class="metrics-section">
-      <div class="metrics-grid-header">
-        <div class="metrics-results-info">
-          Showing <strong id="displayedMetricsCount">29</strong> institutional metrics
-        </div>
-        <div class="view-density-controls">
-          <button class="density-btn active" id="viewGridBtn" title="Grid View"><i class="fa-solid fa-grip"></i></button>
-          <button class="density-btn" id="viewListBtn" title="Compact Table / List View"><i class="fa-solid fa-list"></i></button>
-        </div>
-      </div>
-
-      <!-- Grid of Metric Cards -->
-      <div class="metrics-grid" id="metricsGridContainer">
-        <!-- Dynamically populated by app.js -->
-      </div>
-
-      <!-- Empty / Zero Results State -->
-      <div class="empty-state" id="emptyState" style="display:none;">
-        <div class="empty-icon"><i class="fa-solid fa-filter-circle-xmark"></i></div>
-        <h3>No matching metrics found</h3>
-        <p>No metrics match the selected plan and filter criteria. Try adjusting or clearing your filters.</p>
-        <button class="btn btn-primary btn-sm" id="emptyResetBtn">Reset All Filters</button>
-      </div>
-    </section>
+      </section>
+    </div>
   </main>
 
   <!-- Metric Detail Modal / Popover Inspector -->
