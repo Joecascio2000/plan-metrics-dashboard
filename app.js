@@ -33,6 +33,17 @@
   // Dual-unit metrics where Report Card tracks headcount and Strategic Plan tracks proportions
   const DUAL_UNIT_METRIC_IDS = ['M-024', 'M-025', 'M-035', 'M-036'];
 
+  // ============================================================================
+  // Configuration Settings (Configurable feature toggles)
+  // ============================================================================
+  const CONFIG = {
+    // Show or hide references to Ongoing Report Card (navigation tab, card pill icons, etc.)
+    showOngoingReportCard: false,
+
+    // When Report Card is hidden, whether metrics only belonging to Report Card appear in 'All Plans' tab
+    includeReportCardOnlyMetricsWhenHidden: false
+  };
+
   const PLAN_DEFINITIONS = {
     'Educational Master Plan': {
       title: 'Educational Master Plan (EMP)',
@@ -63,12 +74,12 @@
     },
     'ALL': {
       title: 'All Institutional Plans (Unified Master View)',
-      desc: 'Cross-functional institutional matrix unifying metrics across the Educational Master Plan, Strategic Plan (2026–2030), and Ongoing Report Card.',
+      desc: 'Cross-functional institutional matrix unifying metrics across the Educational Master Plan and Strategic Plan (2026–2030).',
       baselineCol: 'EMP Baseline (2025-2026 Yr 0)',
       targetCol: 'EMP Target Goal',
       goalCol: 'EMP Goal',
       areaCol: 'EMP Plan Area(s) (Values separated with ";")',
-      tags: ['100 Unified Metrics', 'Cross-Plan Taxonomy', 'Districtwide Metrics']
+      tags: ['Unified Institutional Plans', 'Cross-Plan Taxonomy', 'Strategic & EMP Alignment']
     }
   };
 
@@ -79,7 +90,7 @@
   const state = {
     rawMetrics: [],          // Raw rows parsed strictly from master sheet
     normalizedMetrics: [],   // Enriched with calculations, trends, and parsed numbers
-    activePlan: 'Educational Master Plan', // Default active plan tab
+    activePlan: 'ALL',       // Default active plan tab: All Plans Master View (Requirement 2)
     activeFilters: {
       search: '',
       category: '',
@@ -214,6 +225,7 @@
 
   function init() {
     setupTheme();
+    applyConfig();
     setupEventListeners();
 
     // Load initial data: Pre-compiled dataset from master sheet if available
@@ -221,6 +233,14 @@
       processMasterSheetData(window.DEFAULT_PLAN_METRICS, 'unified_plan_metrics_template.xlsx');
     } else {
       showToast('Ready for spreadsheet upload. Drag & drop or browse.', 'info');
+    }
+  }
+
+  function applyConfig() {
+    // Show or hide Ongoing Report Card tab dynamically based on CONFIG
+    const rcTab = document.getElementById('tab-rc') || document.querySelector('[data-plan="Ongoing Report Card"]');
+    if (rcTab) {
+      rcTab.style.display = CONFIG.showOngoingReportCard ? 'inline-flex' : 'none';
     }
   }
 
@@ -528,6 +548,16 @@
       target = parseTargetValue(rawTarget, baseline);
     }
 
+    // Scale synchronization guard (Fix for M-041 and percentage metrics):
+    // If target is a decimal proportion (<= 1.0) and baseline is on 0-100 scale (or vice versa), synchronize scales
+    if (baseline !== null && target !== null) {
+      if (target <= 1.0 && baseline > 1.0 && activeUnitFormat.toLowerCase().includes('percent')) {
+        baseline = baseline / 100;
+      } else if (target > 1.0 && baseline <= 1.0 && activeUnitFormat.toLowerCase().includes('percent')) {
+        target = target / 100;
+      }
+    }
+
     const latestActual = effectiveLatestActual;
     const isInverse = metric.isInverseMetric;
 
@@ -659,9 +689,21 @@
   function parseNumericValue(val) {
     if (typeof val === 'number') return val;
     if (!val) return null;
-    const cleaned = String(val).replace(/[^0-9.-]/g, '');
-    const num = parseFloat(cleaned);
-    return isNaN(num) ? null : num;
+
+    const str = String(val).trim();
+    // Match the FIRST valid number in the string (e.g. "71.3" from "71.3% (Students of Color) / 69.9% (All Students)")
+    const match = str.match(/[-+]?[0-9]*\.?[0-9]+/);
+    if (!match) return null;
+
+    let num = parseFloat(match[0]);
+    if (isNaN(num)) return null;
+
+    // If formatted as a percentage like "71.3%", convert to decimal proportion (0.713)
+    if (str.includes('%') && num > 1.0) {
+      num = num / 100;
+    }
+
+    return num;
   }
 
   // ============================================================================
@@ -732,6 +774,10 @@
   function populateFilterDropdowns() {
     // Determine metrics matching the active Plan
     const planMetrics = state.normalizedMetrics.filter(m => {
+      if (!CONFIG.showOngoingReportCard && !CONFIG.includeReportCardOnlyMetricsWhenHidden) {
+        const hasVisiblePlan = m.plans.some(p => !p.toLowerCase().includes('report card'));
+        if (!hasVisiblePlan) return false;
+      }
       if (state.activePlan === 'ALL') return true;
       if (state.activePlan === 'Educational Master Plan') {
         return m.plans.includes('Educational Master Plan');
@@ -900,6 +946,11 @@
 
     // Step 1: Filter by Plan
     let list = state.normalizedMetrics.filter(m => {
+      if (!CONFIG.showOngoingReportCard && !CONFIG.includeReportCardOnlyMetricsWhenHidden) {
+        const hasVisiblePlan = m.plans.some(p => !p.toLowerCase().includes('report card'));
+        if (!hasVisiblePlan) return false;
+      }
+
       if (plan === 'ALL') return true;
       if (plan === 'Educational Master Plan') {
         return m.plans.includes('Educational Master Plan');
@@ -1027,12 +1078,22 @@
   }
 
   function updatePlanCounts() {
-    let empCount = 0, spCount = 0, rcCount = 0, allCount = state.normalizedMetrics.length;
+    let empCount = 0, spCount = 0, rcCount = 0, allCount = 0;
 
     state.normalizedMetrics.forEach(m => {
-      if (m.plans.includes('Educational Master Plan')) empCount++;
-      if (m.plans.some(p => p.includes('Strategic Plan'))) spCount++;
-      if (m.plans.includes('Ongoing Report Card')) rcCount++;
+      const hasEmp = m.plans.includes('Educational Master Plan');
+      const hasSp = m.plans.some(p => p.includes('Strategic Plan'));
+      const hasRc = m.plans.includes('Ongoing Report Card');
+
+      if (hasEmp) empCount++;
+      if (hasSp) spCount++;
+      if (hasRc) rcCount++;
+
+      if (CONFIG.showOngoingReportCard || CONFIG.includeReportCardOnlyMetricsWhenHidden) {
+        allCount++;
+      } else if (hasEmp || hasSp) {
+        allCount++;
+      }
     });
 
     if (elements.empCountPill) elements.empCountPill.textContent = empCount;
@@ -1247,8 +1308,9 @@
       yoyHtml = `<span class="actual-year-label ${colorClass}"><i class="fa-solid ${arrowIcon}"></i> ${formattedPct} YoY</span>`;
     }
 
-    // Plan tags
-    const planTagsHtml = metric.plans.map(p => {
+    // Plan tags (Configurable: hide Report Card pills when showOngoingReportCard is false)
+    const visiblePlans = metric.plans.filter(p => CONFIG.showOngoingReportCard || !p.toLowerCase().includes('report card'));
+    const planTagsHtml = visiblePlans.map(p => {
       const shortName = p.includes('Educational Master') ? 'EMP' :
                         p.includes('Strategic Plan') ? 'Strategic Plan' : 'Report Card';
       return `<span class="plan-mini-tag">${escapeHtml(shortName)}</span>`;
@@ -1496,8 +1558,8 @@
 
     // Context & Governance
     elements.modalDefinition.textContent = m.definition;
-    elements.modalPillar.textContent = m.pillar;
-    elements.modalPlanAlignment.textContent = m.plans.join(', ') || 'Districtwide Master Plan';
+    const visiblePlansModal = m.plans.filter(p => CONFIG.showOngoingReportCard || !p.toLowerCase().includes('report card'));
+    elements.modalPlanAlignment.textContent = visiblePlansModal.join(', ') || 'Districtwide Master Plan';
     elements.modalGoalArea.textContent = [...m.empGoals, ...m.spGoals, ...m.empPlanAreas].join('; ') || 'Institutional Performance';
     elements.modalDataSource.textContent = m.dataSource;
     elements.modalResponsible.textContent = m.responsible;
