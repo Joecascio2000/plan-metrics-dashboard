@@ -217,6 +217,8 @@
     modalForecastVerdictBox: document.getElementById('modalForecastVerdictBox'),
     modalForecastVerdictIcon: document.getElementById('modalForecastVerdictIcon'),
     modalForecastVerdictText: document.getElementById('modalForecastVerdictText'),
+    modalForecastPathwayContainer: document.getElementById('modalForecastPathwayContainer'),
+    modalForecastPathwaySteps: document.getElementById('modalForecastPathwaySteps'),
     modalTrendCanvas: document.getElementById('modalTrendCanvas'),
     modalHistoryTable: document.getElementById('modalHistoryTable'),
     modalDefinition: document.getElementById('modalDefinition'),
@@ -516,21 +518,95 @@
     return isNaN(yr) ? 2026 : yr;
   }
 
-  function calculateLinearSlope(points) {
+  function formatShortYear(yrStr) {
+    if (!yrStr) return '';
+    const parts = String(yrStr).trim().split('-');
+    if (parts.length === 2) {
+      return `'${parts[0].slice(-2)}-'${parts[1].slice(-2)}`;
+    }
+    return String(yrStr);
+  }
+
+  /**
+   * Adaptive Momentum Regression Engine:
+   * Combines recent institutional momentum (last 3 chronological data points)
+   * with recency-weighted exponential regression across the multi-year history.
+   * This ensures extreme pandemic disruptions (2020-2022) do not drag down
+   * valid post-pandemic recoveries (e.g. In-Person Course Success, Fontana FTES, Chino FTES).
+   */
+  function calculateAdaptiveRegressionSlope(points) {
     if (!points || points.length < 2) return 0;
+    if (points.length === 2) {
+      const dx = points[1].x - points[0].x;
+      return dx !== 0 ? (points[1].y - points[0].y) / dx : 0;
+    }
+
     const n = points.length;
-    let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+
+    // 1. Recent Momentum Window (last 3 chronological points representing active operational trajectory)
+    const recentPoints = points.slice(-3);
+    const nRec = recentPoints.length;
+    let sumXr = 0, sumYr = 0, sumXXr = 0, sumXYr = 0;
+    for (let i = 0; i < nRec; i++) {
+      const x = recentPoints[i].x;
+      const y = recentPoints[i].y;
+      sumXr += x;
+      sumYr += y;
+      sumXXr += x * x;
+      sumXYr += x * y;
+    }
+    const denomRec = nRec * sumXXr - sumXr * sumXr;
+    const mRecent = denomRec !== 0 ? (nRec * sumXYr - sumXr * sumYr) / denomRec : 0;
+
+    // 2. Recency-Weighted Least Squares across full series (decay alpha = 1.6)
+    let sumW = 0, sumWx = 0, sumWy = 0, sumWxx = 0, sumWxy = 0;
     for (let i = 0; i < n; i++) {
+      const w = Math.pow(1.6, i);
       const x = points[i].x;
       const y = points[i].y;
-      sumX += x;
-      sumY += y;
-      sumXX += x * x;
-      sumXY += x * y;
+      sumW += w;
+      sumWx += w * x;
+      sumWy += w * y;
+      sumWxx += w * x * x;
+      sumWxy += w * x * y;
     }
-    const denom = n * sumXX - sumX * sumX;
-    if (denom === 0) return 0;
-    return (n * sumXY - sumX * sumY) / denom;
+    const denomW = sumW * sumWxx - sumWx * sumWx;
+    const mWls = denomW !== 0 ? (sumW * sumWxy - sumWx * sumWy) / denomW : 0;
+
+    // 3. Adaptive Blending
+    // If recent momentum shows sustained recovery or improvement, prioritize active trajectory (80% weight)
+    const isRecentRecovery = recentPoints[recentPoints.length - 1].y > recentPoints[0].y;
+    const recentWeight = isRecentRecovery ? 0.80 : 0.65;
+
+    return (recentWeight * mRecent) + ((1.0 - recentWeight) * mWls);
+  }
+
+  /**
+   * Generates continuous interim annual forecast projections from latest actual up to 2030 deadline.
+   */
+  function generateInterimProjections(latestYearEnd, latestActual, annualSlope, targetHorizonYear) {
+    const horizon = targetHorizonYear || 2030;
+    const interim = [];
+    if (!latestYearEnd || latestActual === null || isNaN(latestActual) || latestYearEnd >= horizon) {
+      return interim;
+    }
+
+    for (let yr = latestYearEnd + 1; yr <= horizon; yr++) {
+      const startYr = yr - 1;
+      const fullLabel = `${startYr}-${yr}`;
+      const shortLabel = `'${String(startYr).slice(-2)}-'${String(yr).slice(-2)}*`;
+      const elapsedYears = yr - latestYearEnd;
+      const projVal = latestActual + (annualSlope * elapsedYears);
+      interim.push({
+        yearEnd: yr,
+        fullLabel,
+        shortLabel,
+        elapsedYears,
+        value: projVal,
+        isTargetDeadline: yr === horizon
+      });
+    }
+    return interim;
   }
 
   function formatRate(val, unitFormat) {
@@ -666,11 +742,19 @@
       });
     }
 
-    const annualSlope = validHistoryPoints.length >= 2 ? calculateLinearSlope(validHistoryPoints) : 0;
+    // Calculate historical annual rate of change using Adaptive Momentum Regression
+    const annualSlope = validHistoryPoints.length >= 2 ? calculateAdaptiveRegressionSlope(validHistoryPoints) : 0;
     const annualRatePct = (latestActual !== null && latestActual !== 0) ? (annualSlope / Math.abs(latestActual)) * 100 : 0;
 
+    // Generate continuous multi-year interim forecast pathway up to 2030
+    const interimProjections = (target !== null && !isNaN(target) && latestActual !== null)
+      ? generateInterimProjections(latestYearEnd, latestActual, annualSlope, TARGET_HORIZON_YEAR)
+      : [];
+
     // Predictive Projections to By 2030 Deadline
-    let projected2030 = null;
+    let projected2030 = interimProjections.length > 0
+      ? interimProjections[interimProjections.length - 1].value
+      : (target !== null && latestActual !== null ? latestActual + (annualSlope * yearsRemaining) : null);
     let requiredAnnualChange = null;
     let requiredAnnualPct = null;
     let gap = null;
@@ -691,7 +775,6 @@
       targetDisplay = 'No Target Set';
       verdict = 'Annual baseline monitoring; no 2030 target horizon assigned.';
     } else if (latestActual !== null) {
-      projected2030 = latestActual + (annualSlope * yearsRemaining);
       requiredAnnualChange = yearsRemaining > 0 ? (target - latestActual) / yearsRemaining : 0;
       requiredAnnualPct = latestActual !== 0 ? (requiredAnnualChange / Math.abs(latestActual)) * 100 : 0;
 
@@ -793,6 +876,7 @@
       annualSlope,
       annualRatePct,
       projected2030,
+      interimProjections,
       requiredAnnualChange,
       requiredAnnualPct,
       gap,
@@ -1680,7 +1764,7 @@
     const ctx = canvas.getContext('2d');
     const themeColors = getChartThemeColors();
 
-    const historyLabels = metric.history.map(h => h.year.replace('20', "'"));
+    const historyLabels = metric.history.map(h => formatShortYear(h.year));
     const historyValues = metric.history.map(h => h.value);
 
     const hasTargetHorizon = metric.target !== null && !isNaN(metric.target) && metric.yearsRemaining > 0 && metric.projected2030 !== null;
@@ -1688,12 +1772,18 @@
     let labels = [...historyLabels];
     const datasets = [];
 
-    if (hasTargetHorizon) {
-      // Append By 2030 target horizon to labels
-      labels.push("'29-'30*");
+    if (hasTargetHorizon && metric.interimProjections && metric.interimProjections.length > 0) {
+      // 1. Append intermediate projected labels through 2030 (e.g. '26-'27*, '27-'28*, '28-'29*, '29-'30*)
+      metric.interimProjections.forEach(p => {
+        labels.push(p.shortLabel);
+      });
 
-      // Dataset 1: Historical Actuals
-      const actualData = [...historyValues, null];
+      // Dataset 1: Historical Actuals (solid line ending at latest actual, nulls for projected years)
+      const actualData = [...historyValues];
+      for (let i = 0; i < metric.interimProjections.length; i++) {
+        actualData.push(null);
+      }
+
       datasets.push({
         label: 'Historical Actual',
         data: actualData,
@@ -1707,26 +1797,32 @@
         pointBackgroundColor: themeColors.lineColor
       });
 
-      // Dataset 2: Projected 2030 Trajectory Line (connecting latest actual to projected 2030)
+      // Dataset 2: Adaptive Projected Trajectory (smooth line connecting through all intermediate years)
       const projData = Array(labels.length).fill(null);
-      projData[labels.length - 2] = metric.latestActual;
-      projData[labels.length - 1] = metric.projected2030;
-      const projColor = metric.status === 'On Track' || metric.status === 'Goal Met' ? '#0284c7' : '#d97706';
-
-      datasets.push({
-        label: 'Projected 2030 Trajectory',
-        data: projData,
-        borderColor: projColor,
-        borderDash: [4, 4],
-        borderWidth: 2.2,
-        pointRadius: 4.5,
-        pointHoverRadius: 6.5,
-        pointBackgroundColor: projColor,
-        fill: false,
-        tension: 0.2
+      const bridgeIdx = historyValues.length - 1;
+      projData[bridgeIdx] = historyValues[bridgeIdx];
+      metric.interimProjections.forEach((p, idx) => {
+        projData[historyValues.length + idx] = p.value;
       });
 
-      // Dataset 3: 2030 Target Diamond Marker
+      const projColor = metric.status === 'Goal Met' ? '#7c3aed' :
+                        (metric.status === 'On Track' ? '#0284c7' :
+                        (metric.predictiveStatus === 'Behind Pace for 2030' ? '#f59e0b' : '#dc2626'));
+
+      datasets.push({
+        label: 'Projected Trajectory',
+        data: projData,
+        borderColor: projColor,
+        borderDash: [5, 4],
+        borderWidth: 2.2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: projColor,
+        fill: false,
+        tension: 0.25
+      });
+
+      // Dataset 3: 2030 Target Diamond Marker at the horizon
       const targetData = Array(labels.length).fill(null);
       targetData[labels.length - 1] = metric.target;
       datasets.push({
@@ -1737,8 +1833,8 @@
         pointBorderColor: '#ffffff',
         pointBorderWidth: 2,
         pointStyle: 'rectRot',
-        pointRadius: 6,
-        pointHoverRadius: 8,
+        pointRadius: 6.5,
+        pointHoverRadius: 8.5,
         showLine: false
       });
     } else {
@@ -1793,7 +1889,17 @@
             callbacks: {
               label: function (context) {
                 const val = context.parsed.y;
-                return `${context.dataset.label}: ${formatMetricValue(val, metric.unitFormat)}`;
+                if (val === null || val === undefined) return '';
+                if (context.dataset.label === '2030 Target Goal') {
+                  return `2030 Target Goal: ${formatMetricValue(val, metric.unitFormat)}`;
+                }
+                if (context.dataset.label.includes('Projected')) {
+                  if (context.dataIndex === historyValues.length - 1) {
+                    return `Latest Actual (${labels[context.dataIndex]}): ${formatMetricValue(val, metric.unitFormat)}`;
+                  }
+                  return `Adaptive Forecast (${labels[context.dataIndex].replace('*', '')}): ${formatMetricValue(val, metric.unitFormat)}`;
+                }
+                return `Historical Actual: ${formatMetricValue(val, metric.unitFormat)}`;
               }
             }
           }
@@ -1928,8 +2034,32 @@
             (m.status === 'On Track' ? 'fa-circle-check text-green' : 'fa-triangle-exclamation text-amber')
           }`;
         }
+
+        // Annual Projected Pathway Steps
+        if (elements.modalForecastPathwaySteps && elements.modalForecastPathwayContainer) {
+          if (m.interimProjections && m.interimProjections.length > 0) {
+            elements.modalForecastPathwayContainer.style.display = 'flex';
+            elements.modalForecastPathwaySteps.innerHTML = m.interimProjections.map((p, idx) => {
+              const isLast = idx === m.interimProjections.length - 1;
+              const formattedVal = formatMetricValue(p.value, m.unitFormat);
+              return `
+                <div class="forecast-pathway-step ${p.isTargetDeadline ? 'step-deadline' : ''}">
+                  <span class="step-year">${escapeHtml(p.fullLabel)}:</span>
+                  <strong>${formattedVal}</strong>
+                  ${p.isTargetDeadline ? '<i class="fa-solid fa-flag-checkered"></i>' : ''}
+                </div>
+                ${!isLast ? '<i class="fa-solid fa-chevron-right forecast-pathway-arrow"></i>' : ''}
+              `;
+            }).join('');
+          } else {
+            elements.modalForecastPathwayContainer.style.display = 'none';
+          }
+        }
       } else {
         elements.modalForecastSection.style.display = 'none';
+        if (elements.modalForecastPathwayContainer) {
+          elements.modalForecastPathwayContainer.style.display = 'none';
+        }
       }
     }
 
@@ -2024,22 +2154,26 @@
 
     const has2030Forecast = m.target !== null && !isNaN(m.target) && m.projected2030 !== null && m.yearsRemaining > 0;
 
-    const baseLabels = HISTORICAL_YEARS.map(y => y.replace('20', "'"));
-    const dataValues = HISTORICAL_YEARS.map(yr => {
-      const point = m.history.find(h => h.year === yr);
-      return point ? point.value : null;
-    });
+    const historyLabels = m.history.map(h => formatShortYear(h.year));
+    const historyValues = m.history.map(h => h.value);
 
-    let labels = [...baseLabels];
+    let labels = [...historyLabels];
     const datasets = [];
 
-    if (has2030Forecast) {
-      labels.push("'29-'30 (By 2030)");
-      dataValues.push(null);
+    if (has2030Forecast && m.interimProjections && m.interimProjections.length > 0) {
+      // 1. Append intermediate projected year labels through 2030
+      m.interimProjections.forEach(p => {
+        labels.push(p.shortLabel);
+      });
+
+      const actualData = [...historyValues];
+      for (let i = 0; i < m.interimProjections.length; i++) {
+        actualData.push(null);
+      }
 
       datasets.push({
         label: 'Historical Actual',
-        data: dataValues,
+        data: actualData,
         borderColor: '#990000',
         backgroundColor: 'rgba(153, 0, 0, 0.08)',
         fill: true,
@@ -2050,25 +2184,32 @@
         pointBackgroundColor: '#990000'
       });
 
-      // Projected 2030 Trajectory line
+      // Dataset 2: Multi-Year Adaptive Projected Trajectory (smooth curve through all intermediate years)
       const projData = Array(labels.length).fill(null);
-      projData[labels.length - 2] = m.latestActual;
-      projData[labels.length - 1] = m.projected2030;
-      const projColor = m.status === 'On Track' || m.status === 'Goal Met' ? '#0284c7' : '#f59e0b';
+      const bridgeIdx = historyValues.length - 1;
+      projData[bridgeIdx] = historyValues[bridgeIdx];
+      m.interimProjections.forEach((p, idx) => {
+        projData[historyValues.length + idx] = p.value;
+      });
+
+      const projColor = m.status === 'Goal Met' ? '#7c3aed' :
+                        (m.status === 'On Track' ? '#0284c7' :
+                        (m.predictiveStatus === 'Behind Pace for 2030' ? '#f59e0b' : '#dc2626'));
 
       datasets.push({
-        label: `Projected 2030 Trajectory (${formatMetricValue(m.projected2030, m.unitFormat)})`,
+        label: `Adaptive Projected Trajectory (${formatMetricValue(m.projected2030, m.unitFormat)} in 2030)`,
         data: projData,
         borderColor: projColor,
         borderDash: [5, 4],
-        borderWidth: 2.5,
-        pointRadius: 6,
+        borderWidth: 2.8,
+        pointRadius: 5.5,
         pointHoverRadius: 8,
         pointBackgroundColor: projColor,
-        fill: false
+        fill: false,
+        tension: 0.25
       });
 
-      // Target Goal Diamond marker at 2030
+      // Dataset 3: 2030 Target Goal Diamond Marker at the horizon
       const targetPointData = Array(labels.length).fill(null);
       targetPointData[labels.length - 1] = m.target;
       datasets.push({
@@ -2077,16 +2218,16 @@
         borderColor: '#990000',
         pointBackgroundColor: '#990000',
         pointBorderColor: '#ffffff',
-        pointBorderWidth: 2,
+        pointBorderWidth: 2.5,
         pointStyle: 'rectRot',
-        pointRadius: 8,
-        pointHoverRadius: 10,
+        pointRadius: 9,
+        pointHoverRadius: 11,
         showLine: false
       });
     } else {
       datasets.push({
         label: 'Historical Actual',
-        data: dataValues,
+        data: historyValues,
         borderColor: '#990000',
         backgroundColor: 'rgba(153, 0, 0, 0.1)',
         fill: true,
@@ -2142,7 +2283,18 @@
             padding: 10,
             callbacks: {
               label: function (ctx) {
-                return `${ctx.dataset.label}: ${formatMetricValue(ctx.parsed.y, m.unitFormat)}`;
+                const val = ctx.parsed.y;
+                if (val === null || val === undefined) return '';
+                if (ctx.dataset.label.includes('2030 Target Goal')) {
+                  return `2030 Target Goal: ${formatMetricValue(val, m.unitFormat)}`;
+                }
+                if (ctx.dataset.label.includes('Adaptive Projected Trajectory')) {
+                  if (ctx.dataIndex === historyValues.length - 1) {
+                    return `Historical Anchor (${labels[ctx.dataIndex]}): ${formatMetricValue(val, m.unitFormat)}`;
+                  }
+                  return `Adaptive Forecast (${labels[ctx.dataIndex].replace('*', '')}): ${formatMetricValue(val, m.unitFormat)}`;
+                }
+                return `Historical Actual (${labels[ctx.dataIndex]}): ${formatMetricValue(val, m.unitFormat)}`;
               }
             }
           }
