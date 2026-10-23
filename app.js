@@ -72,6 +72,15 @@
       areaCol: 'EMP Plan Area(s) (Values separated with ";")',
       tags: ['6-Year Historical Trends', 'Districtwide Performance', 'Annual Report Card Tracking']
     },
+    'BOTH': {
+      title: 'Overlapping Institutional Plan Metrics (EMP & Strategic Plan)',
+      desc: 'Shared core metrics concurrently included in both the Educational Master Plan (EMP) and Strategic Plan (2026–2030).',
+      baselineCol: 'Strategic Plan Baseline (2024-2025 Yr 0)',
+      targetCol: 'Strategic Plan Target Goal (2026-2030)',
+      goalCol: 'Strategic Plan Goal',
+      areaCol: 'Strategic Plan Objective',
+      tags: ['Cross-Plan Overlap', 'Shared EMP & Strategic Plan Priorities', 'Institutional Core']
+    },
     'ALL': {
       title: 'All Institutional Plans (Unified Master View)',
       desc: 'Cross-functional institutional matrix unifying metrics across the Educational Master Plan and Strategic Plan (2026–2030).',
@@ -141,6 +150,7 @@
     spCountPill: document.getElementById('spCountPill'),
     rcCountPill: document.getElementById('rcCountPill'),
     allCountPill: document.getElementById('allCountPill'),
+    bothCountPill: document.getElementById('bothCountPill'),
 
     // KPI Summary
     kpiHealthPercent: document.getElementById('kpiHealthPercent'),
@@ -679,6 +689,21 @@
         activeUnitFormat = 'Count (Headcount)';
         rawTarget = null;
       }
+    } else if (planName === 'BOTH') {
+      // BOTH (EMP & Strategic Plan Overlap View)
+      if (isDualUnit) {
+        activeUnitFormat = 'Percentage';
+        effectiveLatestActual = parseNumericValue(metric.spBaselineRaw);
+        companionHeadcount = metric.latestActual;
+        rawTarget = metric.spTargetRaw;
+        rawBaseline = metric.spBaselineRaw;
+      } else {
+        rawTarget = metric.spTargetRaw || metric.empTargetRaw;
+        rawBaseline = metric.spBaselineRaw || metric.empBaselineRaw || (metric.history.length > 0 ? metric.history[0].value : null);
+      }
+      targetLabel = 'Shared Target (By 2030)';
+      baselineLabel = 'Baseline Year';
+      defaultBaselineYearEnd = metric.spBaselineRaw ? 2025 : (metric.empBaselineRaw ? 2026 : 2025);
     } else {
       // ALL (Master Unified View)
       if (isDualUnit) {
@@ -1019,6 +1044,11 @@
         if (!hasVisiblePlan) return false;
       }
       if (state.activePlan === 'ALL') return true;
+      if (state.activePlan === 'BOTH') {
+        const hasEmp = m.plans.some(p => p.includes('Educational Master Plan'));
+        const hasSp = m.plans.some(p => p.includes('Strategic Plan'));
+        return hasEmp && hasSp;
+      }
       if (state.activePlan === 'Educational Master Plan') {
         return m.plans.includes('Educational Master Plan');
       }
@@ -1145,13 +1175,13 @@
       Array.from(empAreaSet).sort().forEach(a => {
         areaOptions.push({
           value: a,
-          label: state.activePlan === 'ALL' ? `[EMP] ${a}` : a
+          label: (state.activePlan === 'ALL' || state.activePlan === 'BOTH') ? `[EMP] ${a}` : a
         });
       });
       Array.from(spObjectiveSet).sort().forEach(o => {
         areaOptions.push({
           value: o,
-          label: state.activePlan === 'ALL' ? `[SP] ${o}` : o
+          label: (state.activePlan === 'ALL' || state.activePlan === 'BOTH') ? `[SP] ${o}` : o
         });
       });
 
@@ -1263,6 +1293,11 @@
       }
 
       if (plan === 'ALL') return true;
+      if (plan === 'BOTH') {
+        const hasEmp = m.plans.some(p => p.includes('Educational Master Plan'));
+        const hasSp = m.plans.some(p => p.includes('Strategic Plan'));
+        return hasEmp && hasSp;
+      }
       if (plan === 'Educational Master Plan') {
         return m.plans.includes('Educational Master Plan');
       }
@@ -1398,16 +1433,17 @@
   }
 
   function updatePlanCounts() {
-    let empCount = 0, spCount = 0, rcCount = 0, allCount = 0;
+    let empCount = 0, spCount = 0, rcCount = 0, allCount = 0, bothCount = 0;
 
     state.normalizedMetrics.forEach(m => {
-      const hasEmp = m.plans.includes('Educational Master Plan');
+      const hasEmp = m.plans.some(p => p.includes('Educational Master Plan'));
       const hasSp = m.plans.some(p => p.includes('Strategic Plan'));
       const hasRc = m.plans.includes('Ongoing Report Card');
 
       if (hasEmp) empCount++;
       if (hasSp) spCount++;
       if (hasRc) rcCount++;
+      if (hasEmp && hasSp) bothCount++;
 
       if (CONFIG.showOngoingReportCard || CONFIG.includeReportCardOnlyMetricsWhenHidden) {
         allCount++;
@@ -1420,6 +1456,7 @@
     if (elements.spCountPill) elements.spCountPill.textContent = spCount;
     if (elements.rcCountPill) elements.rcCountPill.textContent = rcCount;
     if (elements.allCountPill) elements.allCountPill.textContent = allCount;
+    if (elements.bothCountPill) elements.bothCountPill.textContent = bothCount;
   }
 
   /**
