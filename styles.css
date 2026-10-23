@@ -1492,6 +1492,24 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+.table-footnote {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.45;
+}
+
+.table-footnote strong {
+  color: var(--text-primary);
+}
+
 .modal-details-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
