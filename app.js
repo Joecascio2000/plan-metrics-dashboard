@@ -98,6 +98,7 @@
       goal: '',
       area: '',
       modality: '',
+      initiative: '',
       status: '',
       quickChip: 'all'
     },
@@ -174,6 +175,7 @@
     goalFilter: document.getElementById('goalFilter'),
     areaFilter: document.getElementById('areaFilter'),
     modalityFilter: document.getElementById('modalityFilter'),
+    initiativeFilter: document.getElementById('initiativeFilter'),
     statusFilter: document.getElementById('statusFilter'),
     resetFiltersBtn: document.getElementById('resetFiltersBtn'),
     filterActiveCount: document.getElementById('filterActiveCount'),
@@ -204,6 +206,17 @@
     modalBaselineLabel: document.getElementById('modalBaselineLabel'),
     modalGapValue: document.getElementById('modalGapValue'),
     modalGapSub: document.getElementById('modalGapSub'),
+    modalForecastSection: document.getElementById('modalForecastSection'),
+    modalForecastYearsRemaining: document.getElementById('modalForecastYearsRemaining'),
+    modalForecastTrajectory: document.getElementById('modalForecastTrajectory'),
+    modalForecastTrajectorySub: document.getElementById('modalForecastTrajectorySub'),
+    modalForecastProjected: document.getElementById('modalForecastProjected'),
+    modalForecastTargetCompare: document.getElementById('modalForecastTargetCompare'),
+    modalForecastRequiredPace: document.getElementById('modalForecastRequiredPace'),
+    modalForecastPaceStatus: document.getElementById('modalForecastPaceStatus'),
+    modalForecastVerdictBox: document.getElementById('modalForecastVerdictBox'),
+    modalForecastVerdictIcon: document.getElementById('modalForecastVerdictIcon'),
+    modalForecastVerdictText: document.getElementById('modalForecastVerdictText'),
     modalTrendCanvas: document.getElementById('modalTrendCanvas'),
     modalHistoryTable: document.getElementById('modalHistoryTable'),
     modalDefinition: document.getElementById('modalDefinition'),
@@ -214,6 +227,8 @@
     modalResponsible: document.getElementById('modalResponsible'),
     modalDisaggregation: document.getElementById('modalDisaggregation'),
     modalNotes: document.getElementById('modalNotes'),
+    modalInitiativeBadges: document.getElementById('modalInitiativeBadges'),
+    modalDatePulled: document.getElementById('modalDatePulled'),
 
     // Toast Container
     toastContainer: document.getElementById('toastContainer')
@@ -351,7 +366,9 @@
   function processMasterSheetData(rows, sourceName) {
     state.rawMetrics = rows;
 
-    state.normalizedMetrics = rows.map(row => {
+    const validRows = (rows || []).filter(r => r && (String(r['Metric ID'] || '').trim() || String(r['Unified Metric Name'] || r['Metric Name'] || '').trim()));
+
+    state.normalizedMetrics = validRows.map(row => {
       const id = String(row['Metric ID'] || '').trim();
       const name = String(row['Unified Metric Name'] || row['Metric Name'] || 'Unnamed Metric').trim();
       const plansField = String(row['Included in Master Plan(s) (Values separated with ";")'] || '');
@@ -369,10 +386,26 @@
       const pillar = String(row['Guided Pathways Alignment'] || 'Institutional Support').trim();
       const notes = String(row['Notes & Methodology Nuances'] || '').trim();
 
-      const empBaselineRaw = row['EMP Baseline (2025-2026 Yr 0)'];
-      const empTargetRaw = row['EMP Target Goal'];
-      const spBaselineRaw = row['Strategic Plan Baseline (2024-2025 Yr 0)'];
-      const spTargetRaw = row['Strategic Plan Target Goal (2026-2030)'];
+      // Flexible column resolution for updated/renamed target & baseline fields
+      const empBaselineRaw = row['EMP Baseline (2025-2026 Yr 0)'] ?? row['EMP Baseline'];
+      const empTargetRaw = row['EMP Target Goal (By 2030)'] ??
+                           row['EMP Target Goal (By YYYY)'] ??
+                           row['EMP Target Goal'] ??
+                           row['EMP Target'];
+      const spBaselineRaw = row['Strategic Plan Baseline (2024-2025 Yr 0)'] ?? row['Strategic Plan Baseline'];
+      const spTargetRaw = row['Strategic Plan Target Goal (By 2030)'] ??
+                          row['Strategic Plan Target Goal (2026-2030)'] ??
+                          row['Strategic Plan Target Goal'] ??
+                          row['Strategic Plan Target'];
+
+      // Institutional Initiative Alignment columns & pull date
+      const datePulled = row['Date Pulled'] ? String(row['Date Pulled']).trim() : null;
+      const accjc = String(row['ACCJC Standards'] || '').trim().toUpperCase() === 'Y';
+      const strongWorkforce = String(row['Strong Workforce'] || '').trim().toUpperCase() === 'Y';
+      const scff = String(row['Student Centered Funding Formula'] || '').trim().toUpperCase() === 'Y' ||
+                   String(row['Metric Trait(s) / Initiative Alignment (Values separated with ";")'] || '').toLowerCase().includes('scff');
+      const sea = String(row['Student Equity & Achievement'] || '').trim().toUpperCase() === 'Y';
+      const vision2030 = String(row['Vision 2030'] || '').trim().toUpperCase() === 'Y';
 
       // Semicolon-split Goals & Areas (Requirement 5)
       const empGoals = String(row['EMP Goal'] || '').split(';').map(g => g.trim()).filter(Boolean);
@@ -434,6 +467,12 @@
         empTargetRaw,
         spBaselineRaw,
         spTargetRaw,
+        datePulled,
+        accjc,
+        strongWorkforce,
+        scff,
+        sea,
+        vision2030,
         history,
         latestActual,
         latestYear,
@@ -463,6 +502,48 @@
     renderDashboard();
   }
 
+  // Target Horizon Constant: By 2030 (Academic year 2029-2030, ending ~May 31, 2030)
+  const TARGET_HORIZON_YEAR = 2030;
+
+  function parseYearEnd(yrStr) {
+    if (!yrStr) return 2026;
+    const parts = String(yrStr).trim().split('-');
+    if (parts.length === 2) {
+      const end = parseInt(parts[1], 10);
+      return isNaN(end) ? 2026 : end;
+    }
+    const yr = parseInt(yrStr, 10);
+    return isNaN(yr) ? 2026 : yr;
+  }
+
+  function calculateLinearSlope(points) {
+    if (!points || points.length < 2) return 0;
+    const n = points.length;
+    let sumX = 0, sumY = 0, sumXX = 0, sumXY = 0;
+    for (let i = 0; i < n; i++) {
+      const x = points[i].x;
+      const y = points[i].y;
+      sumX += x;
+      sumY += y;
+      sumXX += x * x;
+      sumXY += x * y;
+    }
+    const denom = n * sumXX - sumX * sumX;
+    if (denom === 0) return 0;
+    return (n * sumXY - sumX * sumY) / denom;
+  }
+
+  function formatRate(val, unitFormat) {
+    if (val === null || val === undefined || isNaN(val)) return '0';
+    const isPercent = (unitFormat || '').toLowerCase().includes('percent');
+    if (isPercent) {
+      const pct = Math.abs(val) <= 1.0 ? val * 100 : val;
+      return `${pct >= 0 ? '+' : ''}${Math.round(pct * 10) / 10}%`;
+    }
+    const rounded = Math.round(val * 10) / 10;
+    return `${rounded >= 0 ? '+' : ''}${Number(rounded).toLocaleString()}`;
+  }
+
   /**
    * Evaluates plan-specific metrics for the active tab (EMP, Strategic Plan, Report Card, or All).
    * Calculates plan-specific target, baseline, numerical gap, and "On Track" / "Off Track" trend.
@@ -470,6 +551,8 @@
    * Addresses:
    * - Requirement 1: Dual-unit handling (M-024, M-025, M-035, M-036) where counts vs percentages are on different scales.
    * - Requirement 2: Metrics without targets are strictly marked as 'Tracking' (NEVER 'On Track' or 'Needs Attention').
+   * - 2030 Predictive Goal Trajectory & Status Engine: Calculates historical annual rate of change,
+   *   projects whether metric will hit the 2029-2030 deadline, and computes required annual pace.
    */
   function evaluateMetricForActivePlan(metric, planName) {
     const isEmp = planName === 'Educational Master Plan';
@@ -478,17 +561,19 @@
 
     let rawTarget = null;
     let rawBaseline = null;
-    let targetLabel = 'Target Goal';
+    let targetLabel = 'Target Goal (By 2030)';
     let baselineLabel = 'Baseline';
     let activeUnitFormat = metric.unitFormat;
     let effectiveLatestActual = metric.latestActual;
     let companionHeadcount = null;
+    let defaultBaselineYearEnd = 2026;
 
     if (isEmp) {
       rawTarget = metric.empTargetRaw;
       rawBaseline = metric.empBaselineRaw;
-      targetLabel = 'EMP Target';
+      targetLabel = 'EMP Target (By 2030)';
       baselineLabel = '2025-2026 (Yr 0)';
+      defaultBaselineYearEnd = 2026;
 
       if (isDualUnit) {
         activeUnitFormat = 'Count (Headcount)';
@@ -497,39 +582,40 @@
     } else if (isSp) {
       rawTarget = metric.spTargetRaw;
       rawBaseline = metric.spBaselineRaw;
-      targetLabel = 'SP 2030 Target';
+      targetLabel = 'SP Target (By 2030)';
       baselineLabel = '2024-2025 (Yr 0)';
+      defaultBaselineYearEnd = 2025;
 
       if (isDualUnit) {
         // Requirement 1 Fix: In Strategic Plan, the metric is a percentage proportion (DataVista)
         activeUnitFormat = 'Percentage';
-        // Effective actual in Strategic Plan is the Year 0 baseline proportion (e.g. 15.0%, 31.0%, 13.0%, 45.0%)
         effectiveLatestActual = parseNumericValue(metric.spBaselineRaw);
         companionHeadcount = metric.latestActual; // companion student count from Report Card
       }
     } else if (planName === 'Ongoing Report Card') {
-      // Ongoing Report Card tracks annual baseline performance; does not impose SP targets
       rawTarget = isDualUnit ? null : metric.empTargetRaw;
       rawBaseline = metric.history.length > 0 ? metric.history[0].value : null;
       targetLabel = 'Report Card Target';
       baselineLabel = '2020-2021 Baseline';
+      defaultBaselineYearEnd = 2021;
 
       if (isDualUnit) {
         activeUnitFormat = 'Count (Headcount)';
-        rawTarget = null; // No target horizon in Report Card headcount
+        rawTarget = null;
       }
     } else {
       // ALL (Master Unified View)
       if (isDualUnit) {
         activeUnitFormat = 'Count (Headcount)';
-        rawTarget = null; // Avoid scale clash in unified view
+        rawTarget = null;
         companionHeadcount = metric.latestActual;
       } else {
         rawTarget = metric.empTargetRaw || metric.spTargetRaw;
         rawBaseline = metric.empBaselineRaw || metric.spBaselineRaw || (metric.history.length > 0 ? metric.history[0].value : null);
       }
-      targetLabel = 'Target Horizon';
+      targetLabel = 'Target Horizon (By 2030)';
       baselineLabel = 'Baseline Year';
+      defaultBaselineYearEnd = metric.empBaselineRaw ? 2026 : 2025;
     }
 
     // Parse numeric baseline
@@ -540,12 +626,15 @@
       baseline = metric.history[0].value;
     }
 
+    // Years from baseline to 2030 target deadline (2029-2030 academic year)
+    const yearsFromBaseline = Math.max(1, TARGET_HORIZON_YEAR - defaultBaselineYearEnd);
+
     // Parse numeric target
     let target = null;
     let targetDisplay = 'No Target Set';
     if (rawTarget !== null && rawTarget !== undefined && rawTarget !== '') {
       targetDisplay = String(rawTarget).trim();
-      target = parseTargetValue(rawTarget, baseline);
+      target = parseTargetValue(rawTarget, baseline, yearsFromBaseline);
     }
 
     // Scale synchronization guard (Fix for M-041 and percentage metrics):
@@ -561,74 +650,128 @@
     const latestActual = effectiveLatestActual;
     const isInverse = metric.isInverseMetric;
 
-    // Numerical Gap & Progress Calculations
+    // Remaining years from latest actual data year to 2030 target deadline
+    const latestYearEnd = metric.latestYear ? parseYearEnd(metric.latestYear) : 2026;
+    const yearsRemaining = Math.max(0, TARGET_HORIZON_YEAR - latestYearEnd);
+
+    // Calculate historical annual rate of change (linear slope)
+    const validHistoryPoints = metric.history
+      .map(h => ({ x: parseYearEnd(h.year), y: h.value }))
+      .filter(p => p.y !== null && !isNaN(p.y));
+
+    // Handle percentage scaling in history if metric unit is percentage and values > 1.0
+    if (activeUnitFormat.toLowerCase().includes('percent') && target !== null && target <= 1.0) {
+      validHistoryPoints.forEach(p => {
+        if (p.y > 1.0) p.y = p.y / 100;
+      });
+    }
+
+    const annualSlope = validHistoryPoints.length >= 2 ? calculateLinearSlope(validHistoryPoints) : 0;
+    const annualRatePct = (latestActual !== null && latestActual !== 0) ? (annualSlope / Math.abs(latestActual)) * 100 : 0;
+
+    // Predictive Projections to By 2030 Deadline
+    let projected2030 = null;
+    let requiredAnnualChange = null;
+    let requiredAnnualPct = null;
     let gap = null;
     let progressPct = null;
-    let status = 'Tracking'; // 'On Track', 'Off Track', 'Goal Met', 'Tracking'
+    let status = 'Tracking';
+    let predictiveStatus = 'Tracking';
+    let verdict = 'Annual baseline monitoring; no 2030 target horizon assigned.';
     let isAtRisk = false;
 
     // Requirement 2 Enforcement:
     // If NO target horizon is set, the metric MUST strictly show as 'Tracking' (NEVER 'On Track', NEVER 'Needs Attention')
     if (target === null || target === undefined || isNaN(target)) {
       status = 'Tracking';
+      predictiveStatus = 'Tracking Only';
       isAtRisk = false;
       gap = null;
       progressPct = null;
       targetDisplay = 'No Target Set';
+      verdict = 'Annual baseline monitoring; no 2030 target horizon assigned.';
     } else if (latestActual !== null) {
-      // Target IS set: Evaluate Goal Met, On Track, or Off Track
+      projected2030 = latestActual + (annualSlope * yearsRemaining);
+      requiredAnnualChange = yearsRemaining > 0 ? (target - latestActual) / yearsRemaining : 0;
+      requiredAnnualPct = latestActual !== 0 ? (requiredAnnualChange / Math.abs(latestActual)) * 100 : 0;
+
       if (isInverse) {
         // Lower is better (Units accumulated: target 76, baseline 81)
-        gap = latestActual - target; // positive gap means excess units remain
+        gap = latestActual - target;
         const targetMet = latestActual <= target;
 
         if (targetMet) {
           status = 'Goal Met';
+          predictiveStatus = '2030 Target Achieved';
           progressPct = 100;
-        } else if (baseline !== null && baseline !== target) {
-          progressPct = ((baseline - latestActual) / (baseline - target)) * 100;
-          progressPct = Math.max(0, Math.min(progressPct, 150));
-
-          // If current actual is higher than baseline, or moving upwards away from target
-          if (latestActual > baseline || (metric.yoyDelta !== null && metric.yoyDelta > 0.5)) {
-            status = 'Off Track';
-            isAtRisk = true;
-          } else {
-            status = 'On Track';
-          }
+          isAtRisk = false;
+          verdict = `2030 Target already achieved (${formatMetricValue(latestActual, activeUnitFormat)} vs target ${formatMetricValue(target, activeUnitFormat)}). Maintaining momentum.`;
         } else {
-          status = latestActual <= target ? 'Goal Met' : 'On Track';
-          progressPct = Math.max(0, 100 - (gap / target) * 100);
+          if (baseline !== null && baseline !== target) {
+            progressPct = ((baseline - latestActual) / (baseline - target)) * 100;
+            progressPct = Math.max(0, Math.min(progressPct, 150));
+          } else {
+            progressPct = Math.max(0, 100 - (gap / target) * 100);
+          }
+
+          const willHit2030 = projected2030 <= target;
+          const isImproving = annualSlope < 0;
+
+          if (willHit2030) {
+            status = 'On Track';
+            predictiveStatus = 'Projected to Hit 2030 Target';
+            isAtRisk = false;
+            verdict = `At current reduction pace (${formatRate(annualSlope, activeUnitFormat)}/yr), projected to reach ${formatMetricValue(projected2030, activeUnitFormat)} by May 31, 2030, meeting target of ${formatMetricValue(target, activeUnitFormat)}.`;
+          } else if (isImproving) {
+            status = 'Off Track';
+            predictiveStatus = 'Behind Pace for 2030';
+            isAtRisk = true;
+            verdict = `Reducing units (${formatRate(annualSlope, activeUnitFormat)}/yr), but requires accelerated reduction of ${formatRate(requiredAnnualChange, activeUnitFormat)}/yr to reach ${formatMetricValue(target, activeUnitFormat)} by 2030. Projected 2030: ${formatMetricValue(projected2030, activeUnitFormat)}.`;
+          } else {
+            status = 'Off Track';
+            predictiveStatus = 'Needs Attention (Increasing)';
+            isAtRisk = true;
+            verdict = `Average units accumulated are increasing (+${formatRate(annualSlope, activeUnitFormat)}/yr) away from target (${formatMetricValue(target, activeUnitFormat)}).`;
+          }
         }
       } else {
-        // Standard metric: Higher is better (or improving towards target)
-        gap = target - latestActual; // positive gap means remaining distance to target
+        // Standard metric: Higher is better
+        gap = target - latestActual;
         const targetMet = latestActual >= target;
 
         if (targetMet) {
           status = 'Goal Met';
+          predictiveStatus = '2030 Target Achieved';
           progressPct = 100;
-        } else if (baseline !== null && target !== baseline) {
-          progressPct = ((latestActual - baseline) / (target - baseline)) * 100;
-          progressPct = Math.max(0, Math.min(progressPct, 150));
-
-          // Off-track alert logic:
-          // If latest actual is lower than baseline, or moved downwards away from target
-          if (latestActual < baseline || (metric.yoyDelta !== null && metric.yoyDelta < -0.01 && progressPct < 60)) {
-            status = 'Off Track';
-            isAtRisk = true;
-          } else {
-            status = 'On Track';
-          }
+          isAtRisk = false;
+          verdict = `2030 Target already achieved (${formatMetricValue(latestActual, activeUnitFormat)} vs target ${formatMetricValue(target, activeUnitFormat)}). Maintaining trajectory.`;
         } else {
-          progressPct = target > 0 ? (latestActual / target) * 100 : 0;
-          progressPct = Math.max(0, Math.min(progressPct, 150));
-
-          if (metric.yoyDelta !== null && metric.yoyDelta < 0) {
-            status = 'Off Track';
-            isAtRisk = true;
+          if (baseline !== null && target !== baseline) {
+            progressPct = ((latestActual - baseline) / (target - baseline)) * 100;
+            progressPct = Math.max(0, Math.min(progressPct, 150));
           } else {
+            progressPct = target > 0 ? (latestActual / target) * 100 : 0;
+            progressPct = Math.max(0, Math.min(progressPct, 150));
+          }
+
+          const willHit2030 = projected2030 >= target;
+          const isImproving = annualSlope > 0;
+
+          if (willHit2030) {
             status = 'On Track';
+            predictiveStatus = 'Projected to Hit 2030 Target';
+            isAtRisk = false;
+            verdict = `At current annual pace (${formatRate(annualSlope, activeUnitFormat)}/yr), projected to reach ${formatMetricValue(projected2030, activeUnitFormat)} by May 31, 2030, exceeding target of ${formatMetricValue(target, activeUnitFormat)}.`;
+          } else if (isImproving) {
+            status = 'Off Track';
+            predictiveStatus = 'Behind Pace for 2030';
+            isAtRisk = true;
+            verdict = `Currently improving (+${formatRate(annualSlope, activeUnitFormat)}/yr), but behind required pace of ${formatRate(requiredAnnualChange, activeUnitFormat)}/yr. Projected to reach ${formatMetricValue(projected2030, activeUnitFormat)} by 2030 (target: ${formatMetricValue(target, activeUnitFormat)}).`;
+          } else {
+            status = 'Off Track';
+            predictiveStatus = 'Needs Attention (Declining)';
+            isAtRisk = true;
+            verdict = `Trending downward (${formatRate(annualSlope, activeUnitFormat)}/yr) away from target. Requires annual turnaround of ${formatRate(requiredAnnualChange, activeUnitFormat)}/yr to reach ${formatMetricValue(target, activeUnitFormat)} by 2030.`;
           }
         }
       }
@@ -646,17 +789,26 @@
       targetDisplay,
       targetLabel,
       baselineLabel,
+      yearsRemaining,
+      annualSlope,
+      annualRatePct,
+      projected2030,
+      requiredAnnualChange,
+      requiredAnnualPct,
       gap,
       progressPct: progressPct !== null ? Math.round(progressPct * 10) / 10 : null,
       status,
+      predictiveStatus,
+      verdict,
       isAtRisk
     };
   }
 
   /**
    * Parses targets that can be decimals, percentages, integers, or growth text (e.g. "1% per year").
+   * Supports By 2030 horizon compounding.
    */
-  function parseTargetValue(rawTarget, baseline) {
+  function parseTargetValue(rawTarget, baseline, yearsFromBaseline) {
     if (rawTarget === null || rawTarget === undefined) return null;
 
     if (typeof rawTarget === 'number') return rawTarget;
@@ -668,8 +820,8 @@
       const match = str.match(/(\d+(\.\d+)?)%/);
       const rate = match ? parseFloat(match[1]) / 100 : 0.01;
       if (baseline !== null && baseline > 0) {
-        // 5-year target horizon at compound rate
-        return Math.round(baseline * Math.pow(1 + rate, 5) * 100) / 100;
+        const horizon = yearsFromBaseline || 4;
+        return Math.round(baseline * Math.pow(1 + rate, horizon) * 100) / 100;
       }
       return null;
     }
@@ -976,6 +1128,37 @@
     } else {
       state.activeFilters.modality = '';
     }
+
+    // 6. Institutional Initiatives Filter (Only options that have >= 1 matching metric in the active plan)
+    if (elements.initiativeFilter) {
+      const INITIATIVES = [
+        { key: 'vision2030', label: 'Vision 2030', count: planMetrics.filter(m => m.vision2030).length },
+        { key: 'scff', label: 'SCFF (Funding Formula)', count: planMetrics.filter(m => m.scff).length },
+        { key: 'strongWorkforce', label: 'Strong Workforce', count: planMetrics.filter(m => m.strongWorkforce).length },
+        { key: 'sea', label: 'Student Equity & Achievement', count: planMetrics.filter(m => m.sea).length },
+        { key: 'accjc', label: 'ACCJC Standards', count: planMetrics.filter(m => m.accjc).length }
+      ];
+
+      const currentInit = state.activeFilters.initiative;
+      elements.initiativeFilter.innerHTML = '<option value="">All Initiatives</option>';
+      let initStillValid = false;
+
+      INITIATIVES.forEach(({ key, label, count }) => {
+        if (count > 0) {
+          const opt = document.createElement('option');
+          opt.value = key;
+          opt.textContent = `${label} (${count})`;
+          elements.initiativeFilter.appendChild(opt);
+          if (key === currentInit) initStillValid = true;
+        }
+      });
+
+      if (initStillValid) {
+        elements.initiativeFilter.value = currentInit;
+      } else {
+        state.activeFilters.initiative = '';
+      }
+    }
   }
 
   /**
@@ -1059,6 +1242,15 @@
       // Modality / Sub-Group Filter (Dynamic matching)
       if (f.modality) {
         if (!matchesModality(m, f.modality)) return false;
+      }
+
+      // Institutional Initiative Filter
+      if (f.initiative) {
+        if (f.initiative === 'vision2030' && !m.vision2030) return false;
+        if (f.initiative === 'scff' && !m.scff) return false;
+        if (f.initiative === 'strongWorkforce' && !m.strongWorkforce) return false;
+        if (f.initiative === 'sea' && !m.sea) return false;
+        if (f.initiative === 'accjc' && !m.accjc) return false;
       }
 
       // Status Filter
@@ -1290,18 +1482,22 @@
     const formattedTarget = metric.target !== null ? formatMetricValue(metric.target, metric.unitFormat) : metric.targetDisplay;
     const formattedBaseline = metric.baseline !== null ? formatMetricValue(metric.baseline, metric.unitFormat) : 'N/A';
 
-    // Status Badge Markup (Requirement 2: Tracking badge when no target)
+    // Status Badge Markup (Requirement 2 & 2030 Predictive Model)
     let statusClass = 'tracking';
     let statusLabel = 'Tracking';
     let statusIcon = 'fa-chart-line';
 
     if (metric.status === 'Goal Met') {
       statusClass = 'goal-met';
-      statusLabel = 'Goal Met';
+      statusLabel = '2030 Met';
       statusIcon = 'fa-trophy';
+    } else if (metric.predictiveStatus === 'Behind Pace for 2030') {
+      statusClass = 'behind-pace';
+      statusLabel = 'Behind Pace';
+      statusIcon = 'fa-clock';
     } else if (metric.status === 'On Track') {
       statusClass = 'on-track';
-      statusLabel = 'On Track';
+      statusLabel = 'On Track (2030)';
       statusIcon = 'fa-circle-check';
     } else if (metric.status === 'Off Track' || metric.isAtRisk) {
       statusClass = 'off-track';
@@ -1331,12 +1527,27 @@
       progressHtml = `
         <div class="goal-progress-wrap">
           <div class="goal-progress-labels">
-            <span>Target Progress</span>
+            <span>2030 Goal Progress</span>
             <strong>${metric.progressPct}%</strong>
           </div>
           <div class="goal-progress-track">
             <div class="goal-progress-bar ${progressColor}" style="width: ${Math.min(metric.progressPct, 100)}%;"></div>
           </div>
+        </div>
+      `;
+    }
+
+    // 2030 Predictive Trajectory Callout Pill
+    let projectionPillHtml = '';
+    if (metric.target !== null && metric.projected2030 !== null) {
+      const formattedProj = formatMetricValue(metric.projected2030, metric.unitFormat);
+      const formattedPace = formatRate(metric.annualSlope, metric.unitFormat);
+      const isMet = metric.status === 'Goal Met';
+      const pillIcon = isMet ? 'fa-trophy text-purple' : (metric.status === 'On Track' ? 'fa-arrow-trend-up text-green' : (metric.predictiveStatus === 'Behind Pace for 2030' ? 'fa-clock text-amber' : 'fa-triangle-exclamation text-red'));
+      projectionPillHtml = `
+        <div class="card-projection-pill" title="At current annual pace, projected to reach ${formattedProj} by 2030">
+          <i class="fa-solid ${pillIcon}"></i>
+          <span>Pace: <strong>${formattedPace}/yr</strong> &bull; Proj. 2030: <strong>${formattedProj}</strong></span>
         </div>
       `;
     }
@@ -1369,6 +1580,15 @@
         </div>
       `;
     }
+
+    // Institutional Initiative Mini-Badges
+    const activeInits = [];
+    if (metric.vision2030) activeInits.push('<span class="initiative-pill active-initiative"><i class="fa-solid fa-eye"></i> Vision 2030</span>');
+    if (metric.scff) activeInits.push('<span class="initiative-pill active-initiative"><i class="fa-solid fa-calculator"></i> SCFF</span>');
+    if (metric.strongWorkforce) activeInits.push('<span class="initiative-pill"><i class="fa-solid fa-briefcase"></i> Strong Workforce</span>');
+    if (metric.sea) activeInits.push('<span class="initiative-pill"><i class="fa-solid fa-scale-balanced"></i> SEA</span>');
+    if (metric.accjc) activeInits.push('<span class="initiative-pill"><i class="fa-solid fa-award"></i> ACCJC</span>');
+    const initiativeBadgesHtml = activeInits.length > 0 ? `<div class="initiative-tags-cluster">${activeInits.join('')}</div>` : '';
 
     // Requirement 4: Top-bar structured in .card-identifiers-group with .id-pill-wrapper to avoid overlap
     card.innerHTML = `
@@ -1410,10 +1630,13 @@
       </div>
 
       ${progressHtml}
+      ${projectionPillHtml}
 
       <div class="card-chart-container">
         <canvas id="chart-${metric.id}"></canvas>
       </div>
+
+      ${initiativeBadgesHtml}
 
       <div class="card-footer">
         <span class="pillar-tag" title="${escapeHtml(metric.pillar)}">
@@ -1457,16 +1680,74 @@
     const ctx = canvas.getContext('2d');
     const themeColors = getChartThemeColors();
 
-    const labels = metric.history.map(h => h.year.replace('20', "'"));
-    const dataValues = metric.history.map(h => h.value);
+    const historyLabels = metric.history.map(h => h.year.replace('20', "'"));
+    const historyValues = metric.history.map(h => h.value);
 
-    // If historical data is limited to 1 year, render a bar chart, else a curved line chart
-    const chartType = metric.history.length > 2 ? 'line' : 'bar';
+    const hasTargetHorizon = metric.target !== null && !isNaN(metric.target) && metric.yearsRemaining > 0 && metric.projected2030 !== null;
 
-    const datasets = [
-      {
+    let labels = [...historyLabels];
+    const datasets = [];
+
+    if (hasTargetHorizon) {
+      // Append By 2030 target horizon to labels
+      labels.push("'29-'30*");
+
+      // Dataset 1: Historical Actuals
+      const actualData = [...historyValues, null];
+      datasets.push({
+        label: 'Historical Actual',
+        data: actualData,
+        borderColor: themeColors.lineColor,
+        backgroundColor: 'rgba(153, 0, 0, 0.08)',
+        fill: true,
+        tension: 0.35,
+        borderWidth: 2.2,
+        pointRadius: 3.5,
+        pointHoverRadius: 5.5,
+        pointBackgroundColor: themeColors.lineColor
+      });
+
+      // Dataset 2: Projected 2030 Trajectory Line (connecting latest actual to projected 2030)
+      const projData = Array(labels.length).fill(null);
+      projData[labels.length - 2] = metric.latestActual;
+      projData[labels.length - 1] = metric.projected2030;
+      const projColor = metric.status === 'On Track' || metric.status === 'Goal Met' ? '#0284c7' : '#d97706';
+
+      datasets.push({
+        label: 'Projected 2030 Trajectory',
+        data: projData,
+        borderColor: projColor,
+        borderDash: [4, 4],
+        borderWidth: 2.2,
+        pointRadius: 4.5,
+        pointHoverRadius: 6.5,
+        pointBackgroundColor: projColor,
+        fill: false,
+        tension: 0.2
+      });
+
+      // Dataset 3: 2030 Target Diamond Marker
+      const targetData = Array(labels.length).fill(null);
+      targetData[labels.length - 1] = metric.target;
+      datasets.push({
+        label: '2030 Target Goal',
+        data: targetData,
+        borderColor: '#990000',
+        pointBackgroundColor: '#990000',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        pointStyle: 'rectRot',
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        showLine: false
+      });
+    } else {
+      // If historical data is limited to 1 year, render a bar chart, else a curved line chart
+      const chartType = metric.history.length > 2 ? 'line' : 'bar';
+
+      datasets.push({
         label: 'Actual Value',
-        data: dataValues,
+        data: historyValues,
         borderColor: themeColors.lineColor,
         backgroundColor: chartType === 'bar' ? 'rgba(153, 0, 0, 0.75)' : 'rgba(153, 0, 0, 0.08)',
         fill: chartType === 'line',
@@ -1475,24 +1756,24 @@
         pointRadius: 3.5,
         pointHoverRadius: 5.5,
         pointBackgroundColor: themeColors.lineColor
-      }
-    ];
-
-    // Reference Target Line (only if target exists and has matching scale)
-    if (metric.target !== null && !isNaN(metric.target)) {
-      datasets.push({
-        label: metric.targetLabel,
-        data: Array(labels.length).fill(metric.target),
-        borderColor: themeColors.targetLineColor,
-        borderDash: [4, 4],
-        borderWidth: 1.8,
-        pointRadius: 0,
-        fill: false
       });
+
+      // Reference Target Line (only if target exists and has matching scale)
+      if (metric.target !== null && !isNaN(metric.target)) {
+        datasets.push({
+          label: metric.targetLabel,
+          data: Array(labels.length).fill(metric.target),
+          borderColor: themeColors.targetLineColor,
+          borderDash: [4, 4],
+          borderWidth: 1.8,
+          pointRadius: 0,
+          fill: false
+        });
+      }
     }
 
     const chartInstance = new Chart(ctx, {
-      type: chartType,
+      type: 'line',
       data: {
         labels: labels,
         datasets: datasets
@@ -1576,10 +1857,15 @@
     elements.modalUnitBadge.textContent = m.unitFormat;
 
     // Status Badge
-    elements.modalStatusBadge.textContent = m.status === 'Goal Met' ? 'Goal Met' :
-                                            m.status === 'On Track' ? 'On Track' :
+    elements.modalStatusBadge.textContent = m.status === 'Goal Met' ? '2030 Goal Met' :
+                                            m.status === 'On Track' ? 'On Track (2030)' :
+                                            m.predictiveStatus === 'Behind Pace for 2030' ? 'Behind Pace' :
                                             m.status === 'Off Track' ? 'Needs Attention' : 'Tracking';
-    elements.modalStatusBadge.className = `status-badge ${m.status === 'Goal Met' ? 'goal-met' : m.status === 'On Track' ? 'on-track' : m.status === 'Off Track' ? 'off-track' : 'tracking'}`;
+    elements.modalStatusBadge.className = `status-badge ${
+      m.status === 'Goal Met' ? 'goal-met' :
+      (m.predictiveStatus === 'Behind Pace for 2030' ? 'behind-pace' :
+      (m.status === 'On Track' ? 'on-track' : (m.status === 'Off Track' ? 'off-track' : 'tracking')))
+    }`;
 
     // KPI Banner
     elements.modalLatestActual.textContent = formatMetricValue(m.latestActual, m.unitFormat);
@@ -1600,6 +1886,53 @@
       elements.modalGapSub.textContent = 'Baseline Monitoring';
     }
 
+    // 2030 Predictive Goal Forecast Section
+    if (elements.modalForecastSection) {
+      if (m.target !== null && m.projected2030 !== null) {
+        elements.modalForecastSection.style.display = 'flex';
+        if (elements.modalForecastYearsRemaining) {
+          elements.modalForecastYearsRemaining.textContent = `${m.yearsRemaining} Academic Years Remaining`;
+        }
+        if (elements.modalForecastTrajectory) {
+          elements.modalForecastTrajectory.textContent = `${formatRate(m.annualSlope, m.unitFormat)} / yr`;
+        }
+        if (elements.modalForecastTrajectorySub) {
+          const sign = m.annualRatePct >= 0 ? '+' : '';
+          elements.modalForecastTrajectorySub.textContent = `Historical annual rate (${sign}${Math.round(m.annualRatePct * 10) / 10}% avg growth)`;
+        }
+        if (elements.modalForecastProjected) {
+          elements.modalForecastProjected.textContent = formatMetricValue(m.projected2030, m.unitFormat);
+        }
+        if (elements.modalForecastTargetCompare) {
+          elements.modalForecastTargetCompare.textContent = `2030 Target: ${formatMetricValue(m.target, m.unitFormat)}`;
+        }
+        if (elements.modalForecastRequiredPace) {
+          elements.modalForecastRequiredPace.textContent = `${formatRate(m.requiredAnnualChange, m.unitFormat)} / yr`;
+        }
+        if (elements.modalForecastPaceStatus) {
+          elements.modalForecastPaceStatus.textContent = m.status === 'Goal Met' ? '2030 Goal Exceeded' :
+            (m.status === 'On Track' ? 'Ahead of required pace' : 'Behind required pace');
+        }
+        if (elements.modalForecastVerdictText) {
+          elements.modalForecastVerdictText.textContent = m.verdict;
+        }
+        if (elements.modalForecastVerdictBox) {
+          elements.modalForecastVerdictBox.className = `forecast-verdict-box ${
+            m.status === 'Goal Met' || m.status === 'On Track' ? 'verdict-on-track' :
+            (m.predictiveStatus === 'Behind Pace for 2030' ? 'verdict-behind-pace' : 'verdict-off-track')
+          }`;
+        }
+        if (elements.modalForecastVerdictIcon) {
+          elements.modalForecastVerdictIcon.className = `fa-solid ${
+            m.status === 'Goal Met' ? 'fa-trophy text-purple' :
+            (m.status === 'On Track' ? 'fa-circle-check text-green' : 'fa-triangle-exclamation text-amber')
+          }`;
+        }
+      } else {
+        elements.modalForecastSection.style.display = 'none';
+      }
+    }
+
     // Context & Governance
     elements.modalDefinition.textContent = m.definition;
     const visiblePlansModal = m.plans.filter(p => CONFIG.showOngoingReportCard || !p.toLowerCase().includes('report card'));
@@ -1609,6 +1942,28 @@
     elements.modalResponsible.textContent = m.responsible;
     elements.modalDisaggregation.textContent = m.subgroup || 'Total Districtwide';
     elements.modalNotes.textContent = m.notes || 'No specific notes recorded in template.';
+
+    // Modal Institutional Initiative Badges
+    if (elements.modalInitiativeBadges) {
+      elements.modalInitiativeBadges.innerHTML = '';
+      const inits = [
+        { label: 'Vision 2030', active: m.vision2030, icon: 'fa-eye' },
+        { label: 'Student Centered Funding Formula (SCFF)', active: m.scff, icon: 'fa-calculator' },
+        { label: 'Strong Workforce Program', active: m.strongWorkforce, icon: 'fa-briefcase' },
+        { label: 'Student Equity & Achievement (SEA)', active: m.sea, icon: 'fa-scale-balanced' },
+        { label: 'ACCJC Standards', active: m.accjc, icon: 'fa-award' }
+      ];
+      inits.forEach(init => {
+        const badge = document.createElement('span');
+        badge.className = `initiative-pill ${init.active ? 'active-initiative' : ''}`;
+        badge.innerHTML = `<i class="fa-solid ${init.icon}"></i> ${init.label}: <strong>${init.active ? 'Aligned (Y)' : 'N'}</strong>`;
+        elements.modalInitiativeBadges.appendChild(badge);
+      });
+    }
+
+    if (elements.modalDatePulled) {
+      elements.modalDatePulled.textContent = m.datePulled || 'October 22, 2026';
+    }
 
     // Populate Multi-year Historical Data Table
     populateModalHistoryTable(m);
@@ -1667,14 +2022,69 @@
     const ctx = canvas.getContext('2d');
     const themeColors = getChartThemeColors();
 
-    const labels = HISTORICAL_YEARS;
+    const has2030Forecast = m.target !== null && !isNaN(m.target) && m.projected2030 !== null && m.yearsRemaining > 0;
+
+    const baseLabels = HISTORICAL_YEARS.map(y => y.replace('20', "'"));
     const dataValues = HISTORICAL_YEARS.map(yr => {
       const point = m.history.find(h => h.year === yr);
       return point ? point.value : null;
     });
 
-    const datasets = [
-      {
+    let labels = [...baseLabels];
+    const datasets = [];
+
+    if (has2030Forecast) {
+      labels.push("'29-'30 (By 2030)");
+      dataValues.push(null);
+
+      datasets.push({
+        label: 'Historical Actual',
+        data: dataValues,
+        borderColor: '#990000',
+        backgroundColor: 'rgba(153, 0, 0, 0.08)',
+        fill: true,
+        tension: 0.3,
+        borderWidth: 3,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        pointBackgroundColor: '#990000'
+      });
+
+      // Projected 2030 Trajectory line
+      const projData = Array(labels.length).fill(null);
+      projData[labels.length - 2] = m.latestActual;
+      projData[labels.length - 1] = m.projected2030;
+      const projColor = m.status === 'On Track' || m.status === 'Goal Met' ? '#0284c7' : '#f59e0b';
+
+      datasets.push({
+        label: `Projected 2030 Trajectory (${formatMetricValue(m.projected2030, m.unitFormat)})`,
+        data: projData,
+        borderColor: projColor,
+        borderDash: [5, 4],
+        borderWidth: 2.5,
+        pointRadius: 6,
+        pointHoverRadius: 8,
+        pointBackgroundColor: projColor,
+        fill: false
+      });
+
+      // Target Goal Diamond marker at 2030
+      const targetPointData = Array(labels.length).fill(null);
+      targetPointData[labels.length - 1] = m.target;
+      datasets.push({
+        label: `2030 Target Goal (${formatMetricValue(m.target, m.unitFormat)})`,
+        data: targetPointData,
+        borderColor: '#990000',
+        pointBackgroundColor: '#990000',
+        pointBorderColor: '#ffffff',
+        pointBorderWidth: 2,
+        pointStyle: 'rectRot',
+        pointRadius: 8,
+        pointHoverRadius: 10,
+        showLine: false
+      });
+    } else {
+      datasets.push({
         label: 'Historical Actual',
         data: dataValues,
         borderColor: '#990000',
@@ -1685,19 +2095,19 @@
         pointRadius: 5,
         pointHoverRadius: 7,
         pointBackgroundColor: '#990000'
-      }
-    ];
-
-    if (m.target !== null) {
-      datasets.push({
-        label: `${m.targetLabel} (${formatMetricValue(m.target, m.unitFormat)})`,
-        data: Array(labels.length).fill(m.target),
-        borderColor: '#0284c7',
-        borderDash: [6, 6],
-        borderWidth: 2,
-        pointRadius: 0,
-        fill: false
       });
+
+      if (m.target !== null) {
+        datasets.push({
+          label: `${m.targetLabel} (${formatMetricValue(m.target, m.unitFormat)})`,
+          data: Array(labels.length).fill(m.target),
+          borderColor: '#0284c7',
+          borderDash: [6, 6],
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false
+        });
+      }
     }
 
     if (m.baseline !== null) {
@@ -1896,11 +2306,13 @@
         elements.goalFilter.value = '';
         if (elements.areaFilter) elements.areaFilter.value = '';
         elements.modalityFilter.value = '';
+        if (elements.initiativeFilter) elements.initiativeFilter.value = '';
         state.activeFilters.category = '';
         state.activeFilters.pillar = '';
         state.activeFilters.goal = '';
         state.activeFilters.area = '';
         state.activeFilters.modality = '';
+        state.activeFilters.initiative = '';
 
         populateFilterDropdowns();
         renderDashboard();
@@ -2036,6 +2448,13 @@
       renderDashboard();
     });
 
+    if (elements.initiativeFilter) {
+      elements.initiativeFilter.addEventListener('change', (e) => {
+        state.activeFilters.initiative = e.target.value;
+        renderDashboard();
+      });
+    }
+
     elements.statusFilter.addEventListener('change', (e) => {
       state.activeFilters.status = e.target.value;
       renderDashboard();
@@ -2091,6 +2510,7 @@
       goal: '',
       area: '',
       modality: '',
+      initiative: '',
       status: '',
       quickChip: 'all'
     };
@@ -2104,6 +2524,7 @@
     elements.goalFilter.value = '';
     if (elements.areaFilter) elements.areaFilter.value = '';
     elements.modalityFilter.value = '';
+    if (elements.initiativeFilter) elements.initiativeFilter.value = '';
     elements.statusFilter.value = '';
 
     elements.quickChips.forEach(c => c.classList.remove('active'));
@@ -2122,6 +2543,7 @@
     if (f.goal) count++;
     if (f.area) count++;
     if (f.modality) count++;
+    if (f.initiative) count++;
     if (f.status) count++;
     if (f.quickChip && f.quickChip !== 'all') count++;
     if (state.highlightAtRisk) count++;
