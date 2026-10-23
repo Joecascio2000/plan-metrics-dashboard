@@ -1536,6 +1536,147 @@ input:checked + .slider:before {
 }
 
 /* ==========================================================================
+   2030 Predictive Goal Forecast & Initiative Badges
+   ========================================================================== */
+.modal-forecast-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: linear-gradient(135deg, var(--bg-subtle) 0%, var(--bg-surface) 100%);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  padding: 1.15rem;
+}
+
+.forecast-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .forecast-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.forecast-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.forecast-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.forecast-value {
+  font-size: 1.15rem;
+  font-family: var(--font-heading);
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.forecast-sub {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.forecast-verdict-box {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.95rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.forecast-verdict-box.verdict-on-track {
+  border-left: 4px solid var(--status-green);
+  background: var(--status-green-subtle);
+}
+
+.forecast-verdict-box.verdict-behind-pace {
+  border-left: 4px solid var(--status-amber);
+  background: var(--status-amber-subtle);
+}
+
+.forecast-verdict-box.verdict-off-track {
+  border-left: 4px solid var(--status-red);
+  background: var(--status-red-subtle);
+}
+
+.forecast-verdict-box.verdict-tracking {
+  border-left: 4px solid var(--text-muted);
+}
+
+/* Trajectory Pill in Metric Card */
+.card-projection-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.65rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 0.4rem;
+}
+
+.card-projection-pill strong {
+  color: var(--text-primary);
+}
+
+/* Initiative Badges */
+.initiative-tags-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.initiative-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  border-radius: var(--radius-pill);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.initiative-pill.active-initiative {
+  background: var(--chaffey-red-subtle);
+  border-color: var(--chaffey-red);
+  color: var(--chaffey-red);
+}
+
+.status-badge.behind-pace {
+  background-color: var(--status-amber-subtle);
+  color: var(--status-amber);
+  border: 1px solid var(--status-amber-border);
+}
+
+/* ==========================================================================
    Toast Notifications
    ========================================================================== */
 .toast-container {
