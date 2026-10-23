@@ -313,6 +313,19 @@
             </select>
           </div>
 
+          <!-- Institutional Initiative Filter -->
+          <div class="sidebar-filter-item">
+            <label for="initiativeFilter" class="filter-label">Institutional Initiative</label>
+            <select id="initiativeFilter" class="filter-select">
+              <option value="">All Initiatives</option>
+              <option value="vision2030">Vision 2030</option>
+              <option value="scff">SCFF (Funding Formula)</option>
+              <option value="strongWorkforce">Strong Workforce</option>
+              <option value="sea">Student Equity &amp; Achievement</option>
+              <option value="accjc">ACCJC Standards</option>
+            </select>
+          </div>
+
           <!-- Goal Status Filter -->
           <div class="sidebar-filter-item">
             <label for="statusFilter" class="filter-label">Goal Status</label>
@@ -413,6 +426,39 @@
           </div>
         </div>
 
+        <!-- 2030 Predictive Goal Trajectory & Forecast -->
+        <div class="modal-forecast-section" id="modalForecastSection">
+          <div class="modal-section-title">
+            <i class="fa-solid fa-wand-magic-sparkles text-chaffey"></i> 2030 Goal Forecast &amp; Predictive Pace Model
+          </div>
+          <div class="forecast-cards-grid">
+            <div class="forecast-card">
+              <span class="forecast-label">Target Deadline</span>
+              <strong class="forecast-value">May 31, 2030</strong>
+              <span class="forecast-sub" id="modalForecastYearsRemaining">4 Academic Years Remaining</span>
+            </div>
+            <div class="forecast-card">
+              <span class="forecast-label">Historical Trajectory</span>
+              <strong class="forecast-value" id="modalForecastTrajectory">+1.6% / year</strong>
+              <span class="forecast-sub" id="modalForecastTrajectorySub">Annual slope</span>
+            </div>
+            <div class="forecast-card">
+              <span class="forecast-label">Projected 2030 Value</span>
+              <strong class="forecast-value text-blue" id="modalForecastProjected">94.6%</strong>
+              <span class="forecast-sub" id="modalForecastTargetCompare">Target: 90.0%</span>
+            </div>
+            <div class="forecast-card">
+              <span class="forecast-label">Required Annual Pace</span>
+              <strong class="forecast-value" id="modalForecastRequiredPace">+0.4% / year</strong>
+              <span class="forecast-sub" id="modalForecastPaceStatus">Ahead of required pace</span>
+            </div>
+          </div>
+          <div class="forecast-verdict-box" id="modalForecastVerdictBox">
+            <i class="fa-solid fa-circle-check text-green" id="modalForecastVerdictIcon"></i>
+            <span id="modalForecastVerdictText">At current trajectory, projected to reach target by May 31, 2030.</span>
+          </div>
+        </div>
+
         <!-- Large Trend Visualizer Chart -->
         <div class="modal-chart-section">
           <div class="modal-section-title">
@@ -473,6 +519,16 @@
           <div class="detail-block">
             <h4><i class="fa-solid fa-circle-info"></i> Notes &amp; Methodology Nuances</h4>
             <p id="modalNotes">Detailed notes on methodology, reporting nuances, and cross-dashboard alignments.</p>
+          </div>
+
+          <div class="detail-block">
+            <h4><i class="fa-solid fa-landmark"></i> Institutional Initiatives &amp; Alignment</h4>
+            <div id="modalInitiativeBadges" class="initiative-tags-cluster">
+              <!-- Populated dynamically -->
+            </div>
+            <p class="mt-1" style="font-size: 0.75rem; color: var(--text-muted);">
+              <i class="fa-solid fa-clock-rotate-left"></i> Date Pulled: <span id="modalDatePulled">—</span>
+            </p>
           </div>
         </div>
       </div>
