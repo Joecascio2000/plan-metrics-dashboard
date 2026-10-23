@@ -1623,6 +1623,68 @@ input:checked + .slider:before {
   border-left: 4px solid var(--text-muted);
 }
 
+/* Annual Projected Pathway to 2030 */
+.forecast-pathway-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.95rem;
+}
+
+.forecast-pathway-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.forecast-pathway-steps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.forecast-pathway-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.forecast-pathway-step strong {
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+}
+
+.forecast-pathway-step.step-deadline {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.08);
+  color: #0284c7;
+}
+
+.forecast-pathway-step.step-deadline strong {
+  color: #0284c7;
+  font-weight: 800;
+}
+
+.forecast-pathway-arrow {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+}
+
 /* Trajectory Pill in Metric Card */
 .card-projection-pill {
   display: flex;
