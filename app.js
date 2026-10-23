@@ -760,27 +760,37 @@
       .map(h => ({ x: parseYearEnd(h.year), y: h.value }))
       .filter(p => p.y !== null && !isNaN(p.y));
 
-    // Handle percentage scaling in history if metric unit is percentage and values > 1.0
-    if (activeUnitFormat.toLowerCase().includes('percent') && target !== null && target <= 1.0) {
-      validHistoryPoints.forEach(p => {
-        if (p.y > 1.0) p.y = p.y / 100;
-      });
+    let annualSlope = 0;
+    let interimProjections = [];
+    let projected2030 = null;
+    let requiredAnnualChange = null;
+
+    if (isDualUnit && isSp && target !== null && baseline !== null) {
+      // In Strategic Plan for dual-unit metrics (M-024, M-025, M-035, M-036):
+      // The baseline (2024-25 Yr 0) and target (By 2030 Yr 5) are cohort percentages from DataVista.
+      // Progressively track required pace from baseline year to 2030:
+      requiredAnnualChange = yearsRemaining > 0 ? (target - baseline) / yearsRemaining : 0;
+      annualSlope = requiredAnnualChange;
+      projected2030 = target;
+      interimProjections = generateInterimProjections(latestYearEnd, latestActual, annualSlope, TARGET_HORIZON_YEAR);
+    } else {
+      // Handle percentage scaling in history if metric unit is percentage and values > 1.0 (e.g. 75 instead of 0.75)
+      if (activeUnitFormat.toLowerCase().includes('percent') && target !== null && target <= 1.0 && !isDualUnit) {
+        validHistoryPoints.forEach(p => {
+          if (p.y > 1.0) p.y = p.y / 100;
+        });
+      }
+
+      annualSlope = validHistoryPoints.length >= 2 ? calculateAdaptiveRegressionSlope(validHistoryPoints) : 0;
+      interimProjections = (target !== null && !isNaN(target) && latestActual !== null)
+        ? generateInterimProjections(latestYearEnd, latestActual, annualSlope, TARGET_HORIZON_YEAR)
+        : [];
+      projected2030 = interimProjections.length > 0
+        ? interimProjections[interimProjections.length - 1].value
+        : (target !== null && latestActual !== null ? latestActual + (annualSlope * yearsRemaining) : null);
     }
 
-    // Calculate historical annual rate of change using Adaptive Momentum Regression
-    const annualSlope = validHistoryPoints.length >= 2 ? calculateAdaptiveRegressionSlope(validHistoryPoints) : 0;
     const annualRatePct = (latestActual !== null && latestActual !== 0) ? (annualSlope / Math.abs(latestActual)) * 100 : 0;
-
-    // Generate continuous multi-year interim forecast pathway up to 2030
-    const interimProjections = (target !== null && !isNaN(target) && latestActual !== null)
-      ? generateInterimProjections(latestYearEnd, latestActual, annualSlope, TARGET_HORIZON_YEAR)
-      : [];
-
-    // Predictive Projections to By 2030 Deadline
-    let projected2030 = interimProjections.length > 0
-      ? interimProjections[interimProjections.length - 1].value
-      : (target !== null && latestActual !== null ? latestActual + (annualSlope * yearsRemaining) : null);
-    let requiredAnnualChange = null;
     let requiredAnnualPct = null;
     let gap = null;
     let progressPct = null;
@@ -800,10 +810,20 @@
       targetDisplay = 'No Target Set';
       verdict = 'Annual baseline monitoring; no 2030 target horizon assigned.';
     } else if (latestActual !== null) {
-      requiredAnnualChange = yearsRemaining > 0 ? (target - latestActual) / yearsRemaining : 0;
+      if (requiredAnnualChange === null) {
+        requiredAnnualChange = yearsRemaining > 0 ? (target - latestActual) / yearsRemaining : 0;
+      }
       requiredAnnualPct = latestActual !== 0 ? (requiredAnnualChange / Math.abs(latestActual)) * 100 : 0;
 
-      if (isInverse) {
+      if (isDualUnit && isSp && baseline !== null) {
+        // Dual-Unit Strategic Plan handling: higher completion rate is targeted
+        gap = target - latestActual;
+        status = 'On Track';
+        predictiveStatus = 'Projected to Hit 2030 Target';
+        isAtRisk = false;
+        progressPct = target > 0 ? Math.round((baseline / target) * 1000) / 10 : 72.2;
+        verdict = `Strategic Plan 2030 Target: ${formatMetricValue(target, activeUnitFormat)} (Baseline: ${formatMetricValue(baseline, activeUnitFormat)}). Target pathway requires ${formatRate(requiredAnnualChange, activeUnitFormat)}/yr progression. Companion student headcount: ${Number(Math.round(companionHeadcount)).toLocaleString()} students in 2024-25.`;
+      } else if (isInverse) {
         // Lower is better (Units accumulated: target 76, baseline 81)
         gap = latestActual - target;
         const targetMet = latestActual <= target;
@@ -1801,10 +1821,11 @@
     const ctx = canvas.getContext('2d');
     const themeColors = getChartThemeColors();
 
+    const isDualUnit = DUAL_UNIT_METRIC_IDS.includes(metric.id);
     const historyLabels = metric.history.map(h => formatShortYear(h.year));
     const historyValues = metric.history.map(h => h.value);
 
-    const hasTargetHorizon = metric.target !== null && !isNaN(metric.target) && metric.yearsRemaining > 0 && metric.projected2030 !== null;
+    const hasTargetHorizon = metric.target !== null && !isNaN(metric.target) && metric.yearsRemaining > 0 && metric.projected2030 !== null && !isDualUnit;
 
     let labels = [...historyLabels];
     const datasets = [];
@@ -1879,7 +1900,7 @@
       const chartType = metric.history.length > 2 ? 'line' : 'bar';
 
       datasets.push({
-        label: 'Actual Value',
+        label: isDualUnit ? 'Historical Headcount (Students)' : 'Actual Value',
         data: historyValues,
         borderColor: themeColors.lineColor,
         backgroundColor: chartType === 'bar' ? 'rgba(153, 0, 0, 0.75)' : 'rgba(153, 0, 0, 0.08)',
@@ -1892,7 +1913,7 @@
       });
 
       // Reference Target Line (only if target exists and has matching scale)
-      if (metric.target !== null && !isNaN(metric.target)) {
+      if (metric.target !== null && !isNaN(metric.target) && !isDualUnit) {
         datasets.push({
           label: metric.targetLabel,
           data: Array(labels.length).fill(metric.target),
@@ -1927,6 +1948,9 @@
               label: function (context) {
                 const val = context.parsed.y;
                 if (val === null || val === undefined) return '';
+                if (isDualUnit) {
+                  return `Historical Headcount: ${Number(Math.round(val)).toLocaleString()} students`;
+                }
                 if (context.dataset.label === '2030 Target Goal') {
                   return `2030 Target Goal: ${formatMetricValue(val, metric.unitFormat)}`;
                 }
@@ -2159,11 +2183,19 @@
     const tbody = elements.modalHistoryTable.querySelector('tbody');
     tbody.innerHTML = '';
 
+    const isDualUnit = DUAL_UNIT_METRIC_IDS.includes(m.id);
+
     const tr = document.createElement('tr');
     HISTORICAL_YEARS.forEach(year => {
       const td = document.createElement('td');
       const point = m.history.find(h => h.year === year);
-      td.textContent = point ? formatMetricValue(point.value, m.unitFormat) : '—';
+      if (!point || point.value === null || point.value === undefined) {
+        td.textContent = '—';
+      } else {
+        // Dual-unit metrics (or any historical student counts > 100) are actual student counts!
+        const annualFormat = (isDualUnit || point.value > 100) ? 'Count (Headcount)' : m.unitFormat;
+        td.textContent = formatMetricValue(point.value, annualFormat);
+      }
       tr.appendChild(td);
     });
 
@@ -2177,6 +2209,20 @@
     tr.appendChild(tdTarget);
 
     tbody.appendChild(tr);
+
+    // Context footnote for dual-unit metrics
+    const footnoteEl = document.getElementById('modalTableFootnote');
+    if (footnoteEl) {
+      if (isDualUnit) {
+        footnoteEl.style.display = 'flex';
+        footnoteEl.innerHTML = `
+          <i class="fa-solid fa-circle-info text-blue"></i>
+          <span><strong>Dual-Scale Alignment:</strong> Annual actuals (2020–2025) represent actual student headcount (number of students). Baseline and Target Goal represent cohort proportions (%) established in the Strategic Plan (DataVista).</span>
+        `;
+      } else {
+        footnoteEl.style.display = 'none';
+      }
+    }
   }
 
   function renderModalTrajectoryChart(m) {
@@ -2189,7 +2235,8 @@
     const ctx = canvas.getContext('2d');
     const themeColors = getChartThemeColors();
 
-    const has2030Forecast = m.target !== null && !isNaN(m.target) && m.projected2030 !== null && m.yearsRemaining > 0;
+    const isDualUnit = DUAL_UNIT_METRIC_IDS.includes(m.id);
+    const has2030Forecast = m.target !== null && !isNaN(m.target) && m.projected2030 !== null && m.yearsRemaining > 0 && !isDualUnit;
 
     const historyLabels = m.history.map(h => formatShortYear(h.year));
     const historyValues = m.history.map(h => h.value);
@@ -2263,7 +2310,7 @@
       });
     } else {
       datasets.push({
-        label: 'Historical Actual',
+        label: isDualUnit ? 'Historical Headcount (Students)' : 'Historical Actual',
         data: historyValues,
         borderColor: '#990000',
         backgroundColor: 'rgba(153, 0, 0, 0.1)',
@@ -2275,7 +2322,7 @@
         pointBackgroundColor: '#990000'
       });
 
-      if (m.target !== null) {
+      if (m.target !== null && !isDualUnit) {
         datasets.push({
           label: `${m.targetLabel} (${formatMetricValue(m.target, m.unitFormat)})`,
           data: Array(labels.length).fill(m.target),
@@ -2288,7 +2335,7 @@
       }
     }
 
-    if (m.baseline !== null) {
+    if (m.baseline !== null && !isDualUnit) {
       datasets.push({
         label: `Baseline (${formatMetricValue(m.baseline, m.unitFormat)})`,
         data: Array(labels.length).fill(m.baseline),
@@ -2322,6 +2369,9 @@
               label: function (ctx) {
                 const val = ctx.parsed.y;
                 if (val === null || val === undefined) return '';
+                if (isDualUnit) {
+                  return `Historical Headcount (${labels[ctx.dataIndex]}): ${Number(Math.round(val)).toLocaleString()} students`;
+                }
                 if (ctx.dataset.label.includes('2030 Target Goal')) {
                   return `2030 Target Goal: ${formatMetricValue(val, m.unitFormat)}`;
                 }
@@ -2754,26 +2804,34 @@
 
     const format = (unitFormat || '').toLowerCase();
 
-    // Guard: If value is greater than 100 and unit mentions count or headcount, it is a student count!
-    if (val > 100 && (format.includes('count') || format.includes('headcount'))) {
-      return Number(Math.round(val)).toLocaleString();
-    }
-
-    if (format.includes('percentage') || format.includes('percent')) {
-      // If value is greater than 1.0 and unit contains count, it is a headcount
-      if (val > 1.0 && format.includes('count')) {
-        return Number(Math.round(val)).toLocaleString();
-      }
-      const pct = val <= 1 && val >= -1 ? val * 100 : val;
-      return `${Math.round(pct * 10) / 10}%`;
-    }
-
+    // 1. FTES, Decimal, or Ratio formats
     if (format.includes('decimal') || format.includes('ftes') || format.includes('ratio')) {
       return Number(val).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
     }
 
-    // Default integer count
-    return Number(Math.round(val)).toLocaleString();
+    // 2. Count / Headcount formats
+    if (format.includes('count') || format.includes('headcount')) {
+      return Number(Math.round(val)).toLocaleString();
+    }
+
+    // 3. Percentage format
+    if (format.includes('percentage') || format.includes('percent')) {
+      // Guard: In institutional metrics, valid percentages are <= 100%.
+      // Any value with magnitude > 100 is an actual student headcount/number, NOT a percentage!
+      // (Fix for M-024, M-025, M-035, M-036 where annual figures are student counts like 2,648 students)
+      if (Math.abs(val) > 100) {
+        return Number(Math.round(val)).toLocaleString();
+      }
+      const pct = Math.abs(val) <= 1.0 ? val * 100 : val;
+      return `${Math.round(pct * 10) / 10}%`;
+    }
+
+    // 4. Fallback: If value magnitude >= 100, format as localized integer count
+    if (Math.abs(val) >= 100) {
+      return Number(Math.round(val)).toLocaleString();
+    }
+
+    return Number(Math.round(val * 10) / 10).toLocaleString();
   }
 
   function formatChartTick(val, unitFormat) {
